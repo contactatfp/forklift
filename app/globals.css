@@ -1,26 +1,345 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --steel: #0e1013;
+  --plate: #15181c;
+  --plate-2: #1b1f24;
+  --line: #2a3036;
+  --line-soft: #20262c;
+  --amber: #f0a70a;
+  --amber-deep: #b97f06;
+  --ok: #a3b847;
+  --bad: #d15745;
+  --fog: #d4ccbc;
+  --mute: #8b8578;
+  --phosphor: #9db15c;
+  --paper: #ece3cd;
+  --paper-edge: #d9cdae;
+  --ink: #26231c;
+  --stamp: #b3402f;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-display);
+  --font-mono: var(--font-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+  background: var(--steel);
+  color: var(--fog);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-mono), ui-monospace, monospace;
+}
+
+/* film grain over everything, barely there */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  opacity: 0.045;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+::selection {
+  background: var(--amber);
+  color: #121416;
+}
+
+/* ---------- shared furniture ---------- */
+
+.hazard {
+  flex-shrink: 0;
+  height: 12px;
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--amber),
+    var(--amber) 9px,
+    #121416 9px,
+    #121416 18px
+  );
+}
+
+.stencil {
+  font-family: var(--font-display), sans-serif;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.plate {
+  position: relative;
+  background: linear-gradient(180deg, var(--plate-2) 0%, var(--plate) 100%);
+  border: 1px solid var(--line);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 14px 44px rgba(0, 0, 0, 0.5);
+}
+
+/* corner rivets on sheet metal */
+.rivets::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle 3px at 14px 14px, #3c444c 1.5px, #0c0e10 3px),
+    radial-gradient(circle 3px at calc(100% - 14px) 14px, #3c444c 1.5px, #0c0e10 3px),
+    radial-gradient(circle 3px at 14px calc(100% - 14px), #3c444c 1.5px, #0c0e10 3px),
+    radial-gradient(circle 3px at calc(100% - 14px) calc(100% - 14px), #3c444c 1.5px, #0c0e10 3px);
+}
+
+.lamp {
+  width: 9px;
+  height: 9px;
+  border-radius: 99px;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+}
+
+.lamp-live {
+  animation: lamp-pulse 1.3s ease-in-out infinite;
+}
+
+@keyframes lamp-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.term {
+  position: relative;
+  overflow: auto;
+  background: #0a0c0d;
+  color: var(--phosphor);
+  font-size: 11px;
+  line-height: 1.55;
+  scrollbar-width: thin;
+  scrollbar-color: #2a3036 transparent;
+}
+
+.term::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0 2px,
+    rgba(0, 0, 0, 0.22) 2px 3px
+  );
+}
+
+/* ---------- landing: the requisition slip ---------- */
+
+.paper {
+  position: relative;
+  background:
+    linear-gradient(90deg, transparent 0 42px, rgba(179, 64, 47, 0.5) 42px 43.5px, transparent 43.5px),
+    repeating-linear-gradient(180deg, transparent 0 27px, rgba(38, 35, 28, 0.07) 27px 28px),
+    linear-gradient(180deg, var(--paper), var(--paper-edge));
+  color: var(--ink);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+}
+
+.paper::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -6px;
+  height: 12px;
+  background-image: radial-gradient(circle 4px at 6px 6px, var(--paper) 4px, transparent 4.5px);
+  background-size: 16px 12px;
+  transform: rotate(180deg);
+}
+
+.paper-field {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 1px dashed rgba(38, 35, 28, 0.45);
+  padding: 4px 2px;
+  font-size: 13px;
+  color: var(--ink);
+  outline: none;
+}
+
+.paper-field:focus {
+  border-bottom-color: var(--ink);
+  border-bottom-style: solid;
+}
+
+.paper-field::placeholder {
+  color: rgba(38, 35, 28, 0.35);
+}
+
+.stamp {
+  display: inline-block;
+  border: 2px solid currentColor;
+  padding: 2px 10px;
+  font-family: var(--font-display), sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  transform: rotate(-4deg);
+  opacity: 0.85;
+}
+
+.wall-lettering {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+}
+
+/* ---------- floor ---------- */
+
+.bay-in {
+  animation: bay-rise 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: calc(var(--i, 0) * 90ms);
+}
+
+@keyframes bay-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.step .tick {
+  width: 100%;
+  height: 4px;
+  background: var(--line);
+}
+
+.step span {
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  color: var(--mute);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.step.done .tick {
+  background: var(--ok);
+}
+
+.step.done span {
+  color: var(--ok);
+}
+
+.step.active .tick {
+  background: var(--amber);
+  animation: lamp-pulse 1.2s ease-in-out infinite;
+}
+
+.step.active span {
+  color: var(--amber);
+}
+
+.step.dead .tick {
+  background: var(--bad);
+}
+
+.step.dead span {
+  color: var(--bad);
+}
+
+.odo {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.odo b {
+  display: grid;
+  place-items: center;
+  min-width: 22px;
+  height: 30px;
+  background: #0a0c0d;
+  border: 1px solid var(--line);
+  color: var(--amber);
+  font-weight: 600;
+  font-size: 15px;
+}
+
+/* ---------- card: the manifest ---------- */
+
+.mrow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.mrow:last-child {
+  border-bottom: none;
+}
+
+.mrow dt {
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  color: var(--mute);
+  white-space: nowrap;
+}
+
+.mrow .dots {
+  flex: 1;
+  border-bottom: 1px dotted var(--line);
+  transform: translateY(-3px);
+}
+
+.mrow dd {
+  font-size: 12.5px;
+  color: var(--fog);
+  text-align: right;
+  word-break: break-word;
+}
+
+.bezel {
+  position: relative;
+  background: #0b0d0f;
+  border: 1px solid var(--line);
+  padding: 12px;
+}
+
+.stamp-yes {
+  color: var(--ok);
+}
+
+.stamp-no {
+  color: var(--bad);
+}
+
+.stamp-man {
+  color: var(--mute);
+}
+
+input,
+textarea,
+button {
+  font-family: inherit;
 }

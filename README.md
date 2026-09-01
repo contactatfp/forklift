@@ -1,36 +1,38 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Forklift
 
-## Getting Started
+Review 300 forks before lunch.
 
-First, run the development server:
+A review engine for the [Solari intern challenge](https://github.com/solari-sdk/solari-cookbook). Paste an upstream repo and judging criteria. Forklift discovers every public fork, runs selected submissions in isolated Solari sandboxes, records a browser walking the live preview, and returns an evidence card. It does not rank candidates and it does not recommend a hire.
+
+## Run locally
 
 ```bash
+cp .env.example .env.local
+# fill SOLARI_API_KEY from console.getsolari.com
+# GITHUB_TOKEN recommended once you pass ~60 GitHub calls/hour
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000). **Run contest review** discovers the cookbook fork network, fills five bays in parallel, and pins this Forklift tree as bay 05.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Without `SOLARI_API_KEY` the floor still runs in fixture mode so you can ship the UI. Live sandbox + recording needs the key.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Verify a submission
 
-## Learn More
+`/verify` or the dock form. One public GitHub URL in, one evidence card out. Export is `/api/bays/:id/export`.
 
-To learn more about Next.js, take a look at the following resources:
+## Railway
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+One service. Add a Postgres plugin and set:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `DATABASE_URL` (from the plugin)
+- `SOLARI_API_KEY`
+- `GITHUB_TOKEN`
+- `FORKLIFT_ACCESS_KEY` (required in production or anyone can spend your Solari credits)
 
-## Deploy on Vercel
+`npm run start` binds `0.0.0.0:$PORT`. Healthcheck is `GET /api/health`. Do not scale replicas; the five-bay pool is in-process.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## `forklift.yaml`
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+If automatic startup detection fails, a repo-root `forklift.yaml` wins. This repo ships one so Forklift can review itself.
