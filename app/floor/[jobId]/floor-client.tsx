@@ -1,7 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from "react";
 import type { Bay, BayStatus, EngineEvent, Job } from "@/lib/types";
 
 const STEPS: Array<{ key: BayStatus; label: string }> = [
@@ -62,7 +71,7 @@ function BayDoor({ bay, i }: { bay: Bay; i: number }) {
   const door = (
     <article
       className="plate rivets bay-in flex h-full flex-col overflow-hidden"
-      style={{ "--i": i } as React.CSSProperties}
+      style={{ "--i": i } as CSSProperties}
     >
       <div className="hazard" style={{ height: 6 }} />
       <div className="flex items-center justify-between px-4 pt-3">
@@ -96,6 +105,18 @@ function BayDoor({ bay, i }: { bay: Bay; i: number }) {
     );
   }
   return door;
+}
+
+function EmptyDoor({ n }: { n: number }) {
+  return (
+    <article className="plate min-h-[300px] opacity-35">
+      <div className="hazard" style={{ height: 6 }} />
+      <div className="px-4 pt-3">
+        <span className="stencil text-4xl">{String(n).padStart(2, "0")}</span>
+        <p className="mt-8 text-[10px] tracking-[0.25em] text-[var(--mute)]">DOOR EMPTY</p>
+      </div>
+    </article>
+  );
 }
 
 function ShiftClock() {
@@ -187,16 +208,71 @@ export function FloorClient({ jobId }: { jobId: string }) {
     [bays],
   );
 
+  const expectedBays = job?.kind === "verify" ? 1 : 5;
+  const bayTotal = bays.length || (job ? expectedBays : 0);
+
+  let doors: ReactNode;
+  if (bays.length) {
+    doors = (
+      <div
+        className={`grid gap-4 ${
+          bays.length === 1 ? "max-w-md md:grid-cols-1" : "md:grid-cols-2 xl:grid-cols-5"
+        }`}
+      >
+        {bays.map((bay, i) => (
+          <BayDoor key={bay.id} bay={bay} i={i} />
+        ))}
+      </div>
+    );
+  } else if (!job) {
+    doors = (
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <EmptyDoor key={n} n={n} />
+        ))}
+      </div>
+    );
+  } else if (job.kind === "verify") {
+    doors = (
+      <div className="max-w-md">
+        <EmptyDoor n={1} />
+        <p className="mt-3 text-[11px] tracking-[0.15em] text-[var(--mute)]">AWAITING DOOR…</p>
+      </div>
+    );
+  } else if (job.status === "queued" || job.status === "discovering") {
+    doors = (
+      <div>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          {[1, 2, 3, 4, 5].map((n) => (
+            <EmptyDoor key={n} n={n} />
+          ))}
+        </div>
+        <p className="mt-3 text-[11px] tracking-[0.15em] text-[var(--mute)]">
+          DISCOVERING NETWORK…
+        </p>
+      </div>
+    );
+  } else {
+    doors = (
+      <p className="text-sm text-[var(--mute)]">Awaiting doors…</p>
+    );
+  }
+
   return (
     <div className="flex min-h-svh flex-col">
       <div className="hazard" />
       <div className="flex flex-1 flex-col px-6 py-8">
         <div className="mb-8 flex flex-wrap items-center justify-between gap-6 border-b border-[var(--line)] pb-6">
-          <div className="flex items-center gap-5">
+          <div className="flex flex-wrap items-center gap-5">
             <Link href="/" className="stencil text-2xl text-[#f3ead8] hover:text-[var(--amber)]">
               FORKLIFT
             </Link>
             <span className="text-[10px] tracking-[0.3em] text-[var(--mute)]">DISPATCH FLOOR</span>
+            {job?.fixture ? (
+              <span className="stamp text-[10px]" style={{ color: "var(--amber)" }}>
+                FIXTURE · not live Solari
+              </span>
+            ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-6 text-[11px] tracking-[0.15em] text-[var(--mute)]">
             <span className="flex items-center gap-2">
@@ -205,7 +281,7 @@ export function FloorClient({ jobId }: { jobId: string }) {
             <span>
               BAYS{" "}
               <b className="text-[var(--fog)]">
-                {done}/{bays.length || 5}
+                {done}/{bayTotal || expectedBays}
               </b>
             </span>
             <span className="uppercase">
@@ -217,19 +293,7 @@ export function FloorClient({ jobId }: { jobId: string }) {
 
         {job?.error ? <p className="mb-6 max-w-2xl text-sm text-[var(--bad)]">{job.error}</p> : null}
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-          {bays.length
-            ? bays.map((bay, i) => <BayDoor key={bay.id} bay={bay} i={i} />)
-            : [1, 2, 3, 4, 5].map((n) => (
-                <article key={n} className="plate min-h-[300px] opacity-35">
-                  <div className="hazard" style={{ height: 6 }} />
-                  <div className="px-4 pt-3">
-                    <span className="stencil text-4xl">{String(n).padStart(2, "0")}</span>
-                    <p className="mt-8 text-[10px] tracking-[0.25em] text-[var(--mute)]">DOOR EMPTY</p>
-                  </div>
-                </article>
-              ))}
-        </div>
+        {doors}
       </div>
       <div className="hazard" />
     </div>

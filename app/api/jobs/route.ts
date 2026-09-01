@@ -1,6 +1,8 @@
 import { accessKeyOk, deny } from "@/lib/access";
 import { enqueueJob, startEngine } from "@/lib/engine";
 import { parseCriteria } from "@/lib/github/parse";
+import { log } from "@/lib/log";
+import { getStore } from "@/lib/store";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -12,9 +14,37 @@ const DEFAULT_CRITERIA = [
   "No secrets in the submitted code",
 ];
 
+export async function GET(request: Request) {
+  if (!accessKeyOk(request)) return deny();
+  try {
+    const store = await getStore();
+    const jobs = await store.listJobs(10);
+    return NextResponse.json({
+      jobs: jobs.map((job) => ({
+        id: job.id,
+        kind: job.kind,
+        status: job.status,
+        upstream: job.upstream,
+        forkCount: job.forkCount,
+        fixture: job.fixture,
+        createdAt: job.createdAt,
+      })),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log("jobs.list.fail", { err: message });
+    return NextResponse.json({ error: message || "Failed to list jobs" }, { status: 500 });
+  }
+}
+
 export async function POST(request: Request) {
   startEngine();
-  const body: unknown = await request.json();
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Expected JSON body" }, { status: 400 });
+  }
   if (!body || typeof body !== "object") {
     return NextResponse.json({ error: "Expected JSON body" }, { status: 400 });
   }
@@ -42,12 +72,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "verifyUrl required" }, { status: 400 });
   }
 
-  const job = await enqueueJob({
-    kind,
-    upstream,
-    criteria,
-    selfRepo: selfRepo === "skip" ? "none" : selfRepo,
-    verifyUrl,
-  });
-  return NextResponse.json({ job });
+  try {
+    const job = await enqueueJob({
+      kind,
+      upstream,
+      criteria,
+      selfRepo: selfRepo === "skip" ? "none" : selfRepo,
+      verifyUrl,
+    });
+    return NextResponse.json({ job });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log("jobs.create.fail", { err: message });
+    return NextResponse.json({ error: message || "Failed to create job" }, { status: 500 });
+  }
 }

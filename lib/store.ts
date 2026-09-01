@@ -1,11 +1,10 @@
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import pg from "pg";
 import { log } from "@/lib/log";
 import type { Bay, BayStatus, Evidence, Job, JobKind, JobStatus } from "@/lib/types";
 
-const DDL = `
+const SQLITE_DDL = `
 CREATE TABLE IF NOT EXISTS jobs (
   id TEXT PRIMARY KEY,
   kind TEXT NOT NULL,
@@ -33,6 +32,38 @@ CREATE TABLE IF NOT EXISTS bays (
   sandbox_id TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS bays_job ON bays(job_id);
+`;
+
+const PG_DDL = `
+CREATE TABLE IF NOT EXISTS jobs (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  status TEXT NOT NULL,
+  upstream TEXT NOT NULL,
+  criteria TEXT NOT NULL,
+  self_repo TEXT,
+  fork_count INTEGER,
+  error TEXT,
+  fixture SMALLINT NOT NULL DEFAULT 0,
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS bays (
+  id TEXT PRIMARY KEY,
+  job_id TEXT NOT NULL,
+  bay INTEGER NOT NULL,
+  repo_json TEXT NOT NULL,
+  is_self SMALLINT NOT NULL DEFAULT 0,
+  status TEXT NOT NULL,
+  logs TEXT NOT NULL DEFAULT '[]',
+  evidence TEXT,
+  screenshot BYTEA,
+  error TEXT,
+  sandbox_id TEXT,
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS bays_job ON bays(job_id);
 `;
@@ -120,6 +151,7 @@ function bayFromRow(row: BayRow, hasScreenshot: boolean): Bay {
 export type Store = {
   createJob: (job: Job) => Promise<void>;
   getJob: (id: string) => Promise<Job | null>;
+  listJobs: (limit?: number) => Promise<Job[]>;
   updateJob: (
     id: string,
     patch: Partial<Pick<Job, "status" | "forkCount" | "error" | "fixture">>,
@@ -128,18 +160,30 @@ export type Store = {
   getBay: (id: string) => Promise<Bay | null>;
   listBays: (jobId: string) => Promise<Bay[]>;
   appendLog: (bayId: string, line: string) => Promise<string[]>;
-  setEvidence: (bayId: string, evidence: Evidence, extra?: { sandboxId?: string | null; error?: string | null; status?: BayStatus }) => Promise<void>;
+  setEvidence: (
+    bayId: string,
+    evidence: Evidence,
+    extra?: { sandboxId?: string | null; error?: string | null; status?: BayStatus },
+  ) => Promise<void>;
   setScreenshot: (bayId: string, png: Uint8Array) => Promise<void>;
   getScreenshot: (bayId: string) => Promise<Uint8Array | null>;
 };
 
-class SqliteStore implements Store {
-  private db: DatabaseSync;
+type SqliteDatabase = {
+  exec: (sql: string) => void;
+  prepare: (sql: string) => {
+    run: (...params: unknown[]) => unknown;
+    get: (...params: unknown[]) => unknown;
+    all: (...params: unknown[]) => unknown[];
+  };
+};
 
-  constructor(path: string) {
-    mkdirSync(dirname(path), { recursive: true });
-    this.db = new DatabaseSync(path);
-    this.db.exec(DDL);
+class SqliteStore implements Store {
+  private db: SqliteDatabase;
+
+  constructor(db: SqliteDatabase) {
+    this.db = db;
+    this.db.exec(SQLITE_DDL);
   }
 
   async createJob(job: Job) {
@@ -166,6 +210,13 @@ class SqliteStore implements Store {
   async getJob(id: string) {
     const row = this.db.prepare("SELECT * FROM jobs WHERE id = ?").get(id);
     return row ? jobFromRow(row as JobRow) : null;
+  }
+
+  async listJobs(limit = 10) {
+    const rows = this.db
+      .prepare("SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?")
+      .all(limit) as JobRow[];
+    return rows.map(jobFromRow);
   }
 
   async updateJob(id: string, patch: Partial<Pick<Job, "status" | "forkCount" | "error" | "fixture">>) {
@@ -215,7 +266,9 @@ class SqliteStore implements Store {
 
   async getBay(id: string) {
     const row = this.db
-      .prepare("SELECT id, job_id, bay, repo_json, is_self, status, logs, evidence, error, sandbox_id, created_at, updated_at, screenshot IS NOT NULL AS has_shot FROM bays WHERE id = ?")
+      .prepare(
+        "SELECT id, job_id, bay, repo_json, is_self, status, logs, evidence, error, sandbox_id, created_at, updated_at, screenshot IS NOT NULL AS has_shot FROM bays WHERE id = ?",
+      )
       .get(id) as (BayRow & { has_shot: number }) | undefined;
     if (!row) return null;
     return bayFromRow(row, Boolean(row.has_shot));
@@ -289,7 +342,14 @@ class PostgresStore implements Store {
   }
 
   async init() {
-    await this.pool.query(DDL.replaceAll("BLOB", "BYTEA").replaceAll("INTEGER NOT NULL DEFAULT 0", "SMALLINT NOT NULL DEFAULT 0"));
+    await this.pool.query(PG_DDL);
+    // existing Railway tables were created with INT4 timestamps — widen them
+    await this.pool.query(`
+      ALTER TABLE jobs ALTER COLUMN created_at TYPE BIGINT;
+      ALTER TABLE jobs ALTER COLUMN updated_at TYPE BIGINT;
+      ALTER TABLE bays ALTER COLUMN created_at TYPE BIGINT;
+      ALTER TABLE bays ALTER COLUMN updated_at TYPE BIGINT;
+    `);
   }
 
   async createJob(job: Job) {
@@ -316,6 +376,13 @@ class PostgresStore implements Store {
     const res = await this.pool.query("SELECT * FROM jobs WHERE id = $1", [id]);
     const row = res.rows[0] as JobRow | undefined;
     return row ? jobFromRow(row) : null;
+  }
+
+  async listJobs(limit = 10) {
+    const res = await this.pool.query("SELECT * FROM jobs ORDER BY created_at DESC LIMIT $1", [
+      limit,
+    ]);
+    return (res.rows as JobRow[]).map(jobFromRow);
   }
 
   async updateJob(id: string, patch: Partial<Pick<Job, "status" | "forkCount" | "error" | "fixture">>) {
@@ -432,10 +499,17 @@ class PostgresStore implements Store {
   }
 }
 
-const globalForStore = globalThis as unknown as { forkliftStore?: Promise<Store> };
+// bump when Store shape changes so HMR doesn't keep a stale singleton
+const STORE_GEN = 2;
+
+const globalForStore = globalThis as unknown as {
+  forkliftStore?: Promise<Store>;
+  forkliftStoreGen?: number;
+};
 
 export function getStore(): Promise<Store> {
-  if (!globalForStore.forkliftStore) {
+  if (!globalForStore.forkliftStore || globalForStore.forkliftStoreGen !== STORE_GEN) {
+    globalForStore.forkliftStoreGen = STORE_GEN;
     globalForStore.forkliftStore = (async () => {
       const url = process.env.DATABASE_URL;
       if (url && url.startsWith("postgres")) {
@@ -446,7 +520,9 @@ export function getStore(): Promise<Store> {
       }
       const path = process.env.FORKLIFT_DB ?? join(process.cwd(), "data", "forklift.sqlite");
       log("store.sqlite", { path });
-      return new SqliteStore(path);
+      mkdirSync(dirname(path), { recursive: true });
+      const { DatabaseSync } = await import("node:sqlite");
+      return new SqliteStore(new DatabaseSync(path));
     })();
   }
   return globalForStore.forkliftStore;

@@ -75,20 +75,21 @@ export async function fixtureBay(input: { bay: Bay; criteria: string[] }): Promi
   }
 
   const stack = detectStack(localFiles);
+  // only self gets a real local Solari detect; guest forks stay unknown in fixture
   const solari = input.bay.isSelf
     ? detectSolari(localFiles)
     : {
-        sandbox: true,
-        browser: true,
+        sandbox: false,
+        browser: false,
         desktop: false,
-        recording: true,
-        packages: ["@solarisdk/sandbox", "@solarisdk/browser"],
-        importHits: ["fixture: assumed from contest fork"],
+        recording: false,
+        packages: [],
+        importHits: ["fixture: no live scan — Solari not claimed"],
       };
 
   const evidence: Evidence = {
     stack: stack.stack === "unknown" ? "node" : stack.stack,
-    build: { ok: true, exitCode: 0, summary: "fixture install ok" },
+    build: { ok: true, exitCode: 0, summary: "fixture build (synthetic)" },
     tests: { ran: false, ok: null, summary: "fixture mode does not run guest tests" },
     diff: {
       filesChanged: input.bay.isSelf ? 40 : 12,

@@ -47,6 +47,7 @@ export default async function CardPage({ params }: { params: Promise<{ bayId: st
   const store = await getStore();
   const bay = await store.getBay(bayId);
   if (!bay) notFound();
+  const job = bay.jobId ? await store.getJob(bay.jobId) : null;
   const ev = bay.evidence;
 
   return (
@@ -70,6 +71,11 @@ export default async function CardPage({ params }: { params: Promise<{ bayId: st
             </p>
           </div>
           <div className="flex flex-col items-end gap-3">
+            {job?.fixture ? (
+              <span className="stamp text-xs" style={{ color: "var(--amber)" }}>
+                FIXTURE · not live Solari
+              </span>
+            ) : null}
             <span className="stamp text-xs" style={{ color: "var(--amber)" }}>
               Evidence only · not a verdict
             </span>

@@ -4,6 +4,18 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+async function readError(res: Response): Promise<string> {
+  try {
+    const body: unknown = await res.json();
+    if (body && typeof body === "object" && "error" in body && typeof body.error === "string") {
+      return body.error;
+    }
+  } catch {
+    /* empty body */
+  }
+  return res.statusText ? `${res.status} ${res.statusText}` : `HTTP ${res.status}`;
+}
+
 export default function VerifyPage() {
   const router = useRouter();
   const [repo, setRepo] = useState("");
@@ -28,17 +40,13 @@ export default function VerifyPage() {
         },
         body: JSON.stringify({ kind: "verify", upstream, verifyUrl: repo.trim(), accessKey }),
       });
+      if (!res.ok) throw new Error(await readError(res));
       const body: unknown = await res.json();
-      if (!res.ok) {
-        const msg =
-          body && typeof body === "object" && "error" in body && typeof body.error === "string"
-            ? body.error
-            : `HTTP ${res.status}`;
-        throw new Error(msg);
-      }
       if (body && typeof body === "object" && "job" in body) {
         const job = body.job as { id: string };
         router.push(`/floor/${job.id}`);
+      } else {
+        throw new Error("Dock returned no job");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -50,13 +58,13 @@ export default function VerifyPage() {
   return (
     <main className="flex min-h-svh flex-col">
       <div className="hazard" />
-      <div className="mx-auto flex w-full max-w-xl flex-1 flex-col justify-center px-6 py-14">
+      <div className="mx-auto flex w-full max-w-lg flex-1 flex-col justify-center px-6 py-14">
         <p className="text-[10px] tracking-[0.3em] text-[var(--mute)]">
           <Link href="/" className="hover:text-[var(--amber)]">
             ← FORKLIFT
           </Link>
         </p>
-        <div className="paper relative mt-5 px-10 py-8 pl-14 sm:px-12 sm:pl-16">
+        <div className="paper relative mt-5 w-full px-10 py-8 pl-14 sm:px-12 sm:pl-16">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-[10px] tracking-[0.3em] opacity-70">FORM FK-1 · REV 1</p>
@@ -101,6 +109,9 @@ export default function VerifyPage() {
               value={accessKey}
               onChange={(e) => setAccessKey(e.target.value)}
             />
+            <p className="mt-2 text-[11px] leading-5 opacity-60">
+              Shared password for this deployment — not your Solari API key.
+            </p>
 
             {error ? (
               <div className="relative mt-6">

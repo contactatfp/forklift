@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { RecentFloors } from "./recent-floors";
 
 const DEFAULT_CRITERIA = `Uses Solari sandboxes as infrastructure
 Uses Solari browser recording
@@ -23,6 +24,18 @@ function key(): string {
 
 function saveKey(value: string) {
   sessionStorage.setItem("forklift-key", value);
+}
+
+async function readError(res: Response): Promise<string> {
+  try {
+    const body: unknown = await res.json();
+    if (body && typeof body === "object" && "error" in body && typeof body.error === "string") {
+      return body.error;
+    }
+  } catch {
+    /* empty body */
+  }
+  return res.statusText ? `${res.status} ${res.statusText}` : `HTTP ${res.status}`;
 }
 
 function Requisition() {
@@ -55,17 +68,13 @@ function Requisition() {
           accessKey,
         }),
       });
+      if (!res.ok) throw new Error(await readError(res));
       const body: unknown = await res.json();
-      if (!res.ok) {
-        const msg =
-          body && typeof body === "object" && "error" in body && typeof body.error === "string"
-            ? body.error
-            : `HTTP ${res.status}`;
-        throw new Error(msg);
-      }
       if (body && typeof body === "object" && "job" in body) {
         const job = body.job as { id: string };
         router.push(`/floor/${job.id}`);
+      } else {
+        throw new Error("Dock returned no job");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -127,7 +136,7 @@ function Requisition() {
           onChange={(e) => setVerifyUrl(e.target.value)}
         />
 
-        <label className="mt-5 block text-[10px] tracking-[0.22em] opacity-70">AUTHORIZATION KEY</label>
+        <label className="mt-5 block text-[10px] tracking-[0.22em] opacity-70">ACCESS KEY</label>
         <input
           className="paper-field mt-1"
           type="password"
@@ -135,6 +144,9 @@ function Requisition() {
           value={accessKey}
           onChange={(e) => setAccessKey(e.target.value)}
         />
+        <p className="mt-2 text-[11px] leading-5 opacity-60">
+          Shared password for this deployment — not your Solari API key.
+        </p>
 
         {error ? (
           <div className="relative mt-6">
@@ -201,6 +213,7 @@ export default function Home() {
             <p className="mt-8 text-[11px] tracking-[0.2em] text-[var(--mute)]">
               APPLICANT? <Link href="/verify" className="text-[var(--amber)]">VERIFY MY SUBMISSION →</Link>
             </p>
+            <RecentFloors />
           </div>
         </header>
 
