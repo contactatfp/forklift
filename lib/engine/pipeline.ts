@@ -1,4 +1,4 @@
-import type { Sandbox } from "@solarisdk/sandbox";
+import type { CommandHandle, Sandbox } from "@solarisdk/sandbox";
 import { parseDiff, parseDirDiff } from "@/lib/detect/diff";
 import { EMPTY_SOLARI, detectSolari, mergeSolari } from "@/lib/detect/solari";
 import { checkReadme, evaluateCriteria } from "@/lib/detect/readme";
@@ -184,23 +184,36 @@ async function readGuestFiles(sbx: Sandbox, dir: string, opts?: { search?: boole
 const PREVIEW_WAIT_MS = 150_000;
 const LOOPBACK_CHECK_AFTER_MS = 20_000;
 
-/** Does anything answer HTTP on 127.0.0.1:port inside the guest? Any status counts. */
-async function listeningOnLoopback(sbx: Sandbox, port: number): Promise<boolean> {
+/**
+ * Does anything answer HTTP on loopback:port inside the guest? Returns the
+ * address that answered. Vite listens on `localhost`, which on Node 17+ is
+ * `::1` first — so a 127.0.0.1-only probe misses it. Any HTTP status counts.
+ */
+async function listeningOnLoopback(sbx: Sandbox, port: number): Promise<string | null> {
   const probe = await sbx.commands.run("python3", {
     args: [
       "-c",
-      `import urllib.request,sys\ntry:\n  urllib.request.urlopen('http://127.0.0.1:${port}/',timeout=3)\n  print('up')\nexcept urllib.error.HTTPError:\n  print('up')\nexcept Exception as e:\n  print('down',e)`,
+      [
+        "import urllib.request,urllib.error",
+        `for h in ('127.0.0.1','[::1]'):`,
+        "  try:",
+        `    urllib.request.urlopen('http://%s:${port}/' % h, timeout=3); print(h); break`,
+        "  except urllib.error.HTTPError:",
+        "    print(h); break",
+        "  except Exception: pass",
+      ].join("\n"),
     ],
-    timeoutMs: 8_000,
+    timeoutMs: 10_000,
   });
-  return probe.stdout.trim().startsWith("up");
+  const host = probe.stdout.trim();
+  return host === "127.0.0.1" || host === "[::1]" ? host.replace(/[[\]]/g, "") : null;
 }
 
 /**
- * Vite, CRA and friends bind 127.0.0.1 by default and ignore HOST, so the
+ * Vite, CRA and friends bind loopback by default and ignore HOST, so the
  * preview proxy 502s forever. Put a dumb TCP forwarder on 0.0.0.0 in front.
  */
-async function forwardLoopback(sbx: Sandbox, port: number, fwd: number): Promise<void> {
+async function forwardLoopback(sbx: Sandbox, host: string, port: number, fwd: number): Promise<void> {
   const script = `import socket,threading
 def pipe(a,b):
   try:
@@ -213,7 +226,7 @@ def pipe(a,b):
     try: b.shutdown(socket.SHUT_WR)
     except Exception: pass
 def handle(c):
-  try: u=socket.create_connection(('127.0.0.1',${port}),timeout=10)
+  try: u=socket.create_connection((${JSON.stringify(host)},${port}),timeout=10)
   except Exception:
     c.close(); return
   threading.Thread(target=pipe,args=(c,u),daemon=True).start()
@@ -223,7 +236,18 @@ s.bind(('0.0.0.0',${fwd})); s.listen(64)
 while True:
   c,_=s.accept(); threading.Thread(target=handle,args=(c,),daemon=True).start()`;
   await sbx.files.write("/tmp/forklift_forward.py", script);
-  await sbx.commands.start("python3", { args: ["/tmp/forklift_forward.py"] });
+  observe(await sbx.commands.start("python3", { args: ["/tmp/forklift_forward.py"] }));
+}
+
+/**
+ * `commands.start()` builds an exit promise that rejects with ConnectionError
+ * when the sandbox is killed. Nobody awaits a long-running server's exit, so
+ * without this the rejection is unhandled and Node takes the whole Next server
+ * down with it — which is exactly what happened on Railway mid-review.
+ */
+function observe(handle: CommandHandle): CommandHandle {
+  handle.wait().catch(() => undefined);
+  return handle;
 }
 
 type PreviewWait = { up: boolean; url: string; forwarded: boolean };
@@ -239,18 +263,29 @@ async function waitForPreview(
   let url = initial.url;
   let forwarded = false;
   const deadline = Math.min(started + PREVIEW_WAIT_MS, started + Math.max(0, budget.remaining() - 60_000));
+  let lastStatus = 0;
   while (Date.now() < deadline) {
     try {
       const res = await fetch(new URL(health || "/", url).toString(), { redirect: "follow" });
-      if (res.ok) return { up: true, url, forwarded };
+      // the gateway answers 502/503/504 while nothing is bound; anything else means the
+      // app itself spoke, and a 404 on "/" from an API-only server is still a live server
+      if (res.status < 500) {
+        if (!res.ok) await onNote(`${health || "/"} answered ${res.status} — app is up, recording anyway`);
+        return { up: true, url, forwarded };
+      }
+      if (res.status !== lastStatus) {
+        lastStatus = res.status;
+        await onNote(`preview gateway ${res.status} — waiting for the app to bind`);
+      }
     } catch {
       /* not up yet */
     }
     if (!forwarded && Date.now() - started > LOOPBACK_CHECK_AFTER_MS) {
-      if (await listeningOnLoopback(sbx, initial.port)) {
+      const host = await listeningOnLoopback(sbx, initial.port);
+      if (host) {
         const fwd = initial.port + 1000;
-        await onNote(`app answers on 127.0.0.1:${initial.port} only · forwarding 0.0.0.0:${fwd} → it`);
-        await forwardLoopback(sbx, initial.port, fwd);
+        await onNote(`app answers on ${host}:${initial.port} only · forwarding 0.0.0.0:${fwd} → it`);
+        await forwardLoopback(sbx, host, initial.port, fwd);
         url = (await sbx.previewUrl(fwd)).url;
         forwarded = true;
         await new Promise((r) => setTimeout(r, 1500));
@@ -607,13 +642,15 @@ export async function reviewBay(input: {
       const env: Record<string, string> = { ...guestEnv, HOST: "0.0.0.0" };
       if (stack.portEnv) env.PORT = String(stack.port);
       // stream the server's own output into the log so a crash on boot is visible on the card
-      await sbx.commands.start("sh", {
-        args: ["-c", stack.start],
-        cwd,
-        env,
-        onStdout: (d) => onLog(d),
-        onStderr: (d) => onLog(d),
-      });
+      observe(
+        await sbx.commands.start("sh", {
+          args: ["-c", stack.start],
+          cwd,
+          env,
+          onStdout: (d) => onLog(d),
+          onStderr: (d) => onLog(d),
+        }),
+      );
       const preview = await sbx.previewUrl(stack.port);
       previewUrl = preview.url;
       await logBay(input.bay, `preview ${previewUrl}`);
