@@ -140,11 +140,15 @@ body::after {
 
 .term {
   position: relative;
+  max-width: 100%;
   overflow: auto;
   background: #0a0c0d;
   color: var(--phosphor);
   font-size: 11px;
   line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   scrollbar-width: thin;
   scrollbar-color: #2a3036 transparent;
 }
@@ -327,12 +331,50 @@ body::after {
   font-size: 15px;
 }
 
-/* ---------- card: the manifest ---------- */
+/* ---------- card: bay dossier / CRT ---------- */
+
+.card-shell {
+  max-width: 56rem; /* ~896px — desktop reading width, not a wall chart */
+  min-width: 0;
+}
+
+.card-mast {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem 1.5rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.card-stack {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.card-split {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+@media (min-width: 900px) {
+  .card-split {
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  }
+}
+
+.card-plate {
+  padding: 1.25rem 1.35rem;
+}
 
 .mrow {
   display: flex;
   align-items: baseline;
   gap: 10px;
+  min-width: 0;
   padding: 9px 0;
   border-bottom: 1px solid var(--line-soft);
 }
@@ -342,6 +384,7 @@ body::after {
 }
 
 .mrow dt {
+  flex: none;
   font-size: 10px;
   letter-spacing: 0.22em;
   color: var(--mute);
@@ -349,28 +392,113 @@ body::after {
 }
 
 .mrow .dots {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 12px;
   border-bottom: 1px dotted var(--line);
   transform: translateY(-3px);
 }
 
 .mrow dd {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 70%;
   font-size: 12.5px;
   color: var(--fog);
   text-align: right;
+  overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.criterion-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-width: 0;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.criterion-row:last-child {
+  border-bottom: none;
+}
+
+.diff-list {
+  max-height: 18rem;
+  overflow: auto;
+  min-width: 0;
+  scrollbar-width: thin;
+  scrollbar-color: #2a3036 transparent;
+}
+
+.diff-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  min-width: 0;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--fog);
+}
+
+.diff-row:last-child {
+  border-bottom: none;
 }
 
 .bezel {
   position: relative;
+  min-width: 0;
+  max-width: 100%;
   background: #0b0d0f;
   border: 1px solid var(--line);
   padding: 12px;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.02),
+    0 18px 48px rgba(0, 0, 0, 0.45);
+}
+
+/* CRT monitor frame for the artifact — the thing you came to inspect */
+.crt {
+  padding: 0;
+  overflow: hidden;
+}
+
+.crt-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, #15181c 0%, #101214 100%);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--mute);
+}
+
+.crt-body {
+  max-height: 22rem;
+  margin: 0;
+  padding: 1rem 0.95rem;
+  border-radius: 0;
+}
+
+.crt-note {
+  padding: 0.75rem 0.95rem 1rem;
+  border-top: 1px solid var(--line-soft);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--mute);
+}
+
+.crt-note code {
+  color: var(--fog);
 }
 
 /* fullPage shots stay full width but don't shove the rest of the card off-screen */
 .shot-frame {
-  max-height: 28rem;
+  max-height: 26rem;
   overflow: auto;
   scrollbar-width: thin;
   scrollbar-color: #2a3036 transparent;
@@ -379,6 +507,7 @@ body::after {
 .shot-frame img {
   display: block;
   width: 100%;
+  max-width: 100%;
   height: auto;
 }
 

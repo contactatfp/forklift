@@ -19,15 +19,39 @@ function facts(ev: Evidence): string {
   return bits.join(" · ");
 }
 
+function shortRepo(url: string): string {
+  try {
+    const u = new URL(url);
+    return u.pathname.replace(/^\//, "").replace(/\.git$/, "") || url;
+  } catch {
+    return url.replace(/^https?:\/\/github\.com\//, "");
+  }
+}
+
 /** What the applicant shipped: a recorded page, or a program that ran to completion. */
-function Artifact({ ev, bayId, hasScreenshot, repoName }: { ev: Evidence; bayId: string; hasScreenshot: boolean; repoName: string }) {
+function Artifact({
+  ev,
+  bayId,
+  hasScreenshot,
+  repoName,
+}: {
+  ev: Evidence;
+  bayId: string;
+  hasScreenshot: boolean;
+  repoName: string;
+}) {
   if (ev.measured === false) {
     return (
-      <section className="bezel">
+      <section className="bezel crt">
+        <div className="crt-bar">
+          <span>MONITOR</span>
+          <span>DRY · NO SIGNAL</span>
+        </div>
         <p className="p-10 text-center text-sm text-[var(--mute)]">Dry run. No sandbox, no browser, no artifact.</p>
       </section>
     );
   }
+
   if (ev.kind === "script" && ev.script) {
     const s = ev.script;
     const verdict = s.timedOut
@@ -35,20 +59,21 @@ function Artifact({ ev, bayId, hasScreenshot, repoName }: { ev: Evidence; bayId:
       : s.needsKey
         ? `EXIT ${s.exitCode ?? "?"} · NOT JUDGED`
         : `EXIT ${s.exitCode ?? "?"}`;
+    const tone = s.timedOut || (s.exitCode !== 0 && !s.needsKey) ? "bad" : s.needsKey ? "amber" : "ok";
     return (
-      <section className="bezel">
-        <div className="flex flex-wrap items-center justify-between gap-3 px-2 pb-3 text-[10px] tracking-[0.2em] text-[var(--mute)]">
-          <span>
+      <section className="bezel crt">
+        <div className="crt-bar">
+          <span className="min-w-0 truncate">
             $ <span className="text-[var(--fog)]">{s.command}</span>
-            {ev.cwd ? <span className="ml-2 opacity-70">in {ev.cwd}</span> : null}
+            {ev.cwd ? <span className="opacity-60"> · {ev.cwd}</span> : null}
           </span>
-          <span style={{ color: s.timedOut || (s.exitCode !== 0 && !s.needsKey) ? "var(--bad)" : s.needsKey ? "var(--amber)" : "var(--ok)" }}>
+          <span className="flex-none" style={{ color: `var(--${tone})` }}>
             {verdict}
           </span>
         </div>
-        <pre className="term max-h-[28rem] p-4">{s.transcript || "(no output)"}</pre>
+        <pre className="term crt-body">{s.transcript || "(no output)"}</pre>
         {s.needsKey ? (
-          <p className="px-2 pt-3 text-[11px] leading-5 text-[var(--mute)]">
+          <p className="crt-note">
             This program reads <code>SOLARI_API_KEY</code>. Forklift never hands its own key to guest code, so the
             exit code above is not held against the submission. Run it with your key to judge it.
           </p>
@@ -56,17 +81,18 @@ function Artifact({ ev, bayId, hasScreenshot, repoName }: { ev: Evidence; bayId:
       </section>
     );
   }
+
   return (
-    <section className="bezel">
+    <section className="bezel crt">
+      <div className="crt-bar">
+        <span>PREVIEW</span>
+        <span>{hasScreenshot ? "FULL PAGE · SCROLL" : "NO SIGNAL"}</span>
+      </div>
       {hasScreenshot ? (
-        <>
-          {/* fullPage PNGs can be tall; keep the card usable, scroll for the rest */}
-          <div className="shot-frame">
-            {/* eslint-disable-next-line @next/next/no-img-element -- PNG straight out of our own DB, no loader wanted */}
-            <img src={`/api/bays/${bayId}/screenshot`} alt={`${repoName} preview screenshot`} className="w-full" />
-          </div>
-          <p className="px-1 pt-2 text-[10px] tracking-[0.18em] text-[var(--mute)]">FULL PAGE · SCROLL INSIDE THE FRAME</p>
-        </>
+        <div className="shot-frame">
+          {/* eslint-disable-next-line @next/next/no-img-element -- PNG straight out of our own DB, no loader wanted */}
+          <img src={`/api/bays/${bayId}/screenshot`} alt={`${repoName} preview screenshot`} />
+        </div>
       ) : (
         <p className="p-10 text-center text-sm text-[var(--mute)]">
           {!ev.previewUrl
@@ -84,7 +110,7 @@ function Criterion({ c }: { c: CriterionResult }) {
   const state = c.kind === "manual" ? "man" : c.met ? "yes" : "no";
   const label = c.kind === "manual" ? "LOOK" : c.met ? "YES" : "NO";
   return (
-    <li className="flex items-center justify-between gap-4 border-b border-[var(--line-soft)] py-3 last:border-none">
+    <li className="criterion-row">
       <div className="min-w-0">
         <p className="text-sm text-[var(--fog)]">{c.label}</p>
         <p className="mt-0.5 text-[11px] leading-5 text-[var(--mute)]">{c.note}</p>
@@ -101,7 +127,7 @@ function Flag({ label, on }: { label: string; on: boolean }) {
       style={{
         color: on ? "var(--ok)" : "var(--mute)",
         borderColor: on ? "var(--ok)" : "var(--line)",
-        opacity: on ? 1 : 0.6,
+        opacity: on ? 1 : 0.55,
       }}
     >
       {label}
@@ -109,11 +135,11 @@ function Flag({ label, on }: { label: string; on: boolean }) {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, children, className = "" }: { title: string; children: React.ReactNode; className?: string }) {
   return (
-    <section className="plate rivets p-6">
+    <section className={`plate rivets card-plate min-w-0 ${className}`}>
       <h2 className="stencil text-sm text-[var(--amber)]">{title}</h2>
-      <div className="mt-4">{children}</div>
+      <div className="mt-4 min-w-0">{children}</div>
     </section>
   );
 }
@@ -131,92 +157,100 @@ export default async function CardPage({ params }: { params: Promise<{ bayId: st
   const nm = "not measured";
 
   return (
-    <main className="flex min-h-svh flex-col">
+    <main className="flex min-h-svh flex-col overflow-x-clip">
       <div className="hazard" />
-      <div className="mx-auto w-full max-w-5xl flex-1 px-6 py-10">
-        <div className="flex flex-wrap items-end justify-between gap-4 border-b border-[var(--line)] pb-6">
-          <div>
+      <div className="card-shell mx-auto w-full flex-1 px-4 py-8 sm:px-6">
+        <header className="card-mast">
+          <div className="min-w-0">
             <Link
               href={bay.jobId ? `/floor/${bay.jobId}` : "/"}
               className="text-[10px] tracking-[0.3em] text-[var(--mute)] hover:text-[var(--amber)]"
             >
               ← FLOOR
             </Link>
-            <h1 className="stencil mt-3 text-5xl text-[#f3ead8]">
-              BAY {String(bay.bay).padStart(2, "0")}
-            </h1>
-            <p className="mt-2 text-sm text-[var(--fog)]">
-              {bay.repo.owner}/{bay.repo.name}
-              {bay.isSelf ? " · this app" : ""}
-            </p>
-            {summary ? (
-              <p className="mt-2 text-[11px] tracking-[0.12em] text-[var(--mute)]">{summary}</p>
-            ) : null}
-          </div>
-          <div className="flex flex-col items-end gap-3">
-            <div className="flex flex-wrap items-center justify-end gap-3">
+            <div className="mt-3 flex flex-wrap items-end gap-x-4 gap-y-2">
+              <h1 className="stencil text-4xl leading-none text-[#f3ead8] sm:text-5xl">
+                BAY {String(bay.bay).padStart(2, "0")}
+              </h1>
               {dryRun ? (
                 <span className="stamp text-xs" style={{ color: "var(--amber)" }}>
                   DRY RUN
                 </span>
-              ) : null}
-              <span
-                className="stamp max-w-full text-center text-[10px] leading-snug"
-                style={{ color: "var(--mute)", transform: "rotate(2deg)" }}
-              >
-                Evidence only · not a verdict
-              </span>
-            </div>
-            {ev ? (
-              <div className="flex gap-3">
-                <a
-                  href={`/api/bays/${bay.id}/export`}
-                  className="press border border-[var(--line)] px-4 py-2 text-[11px] tracking-[0.18em] text-[var(--fog)] hover:border-[var(--amber)] hover:text-[var(--amber)]"
+              ) : (
+                <span
+                  className="stamp max-w-full text-center text-[10px] leading-snug"
+                  style={{ color: "var(--mute)", transform: "rotate(2deg)" }}
                 >
-                  EXPORT JSON
-                </a>
-                {ev.browserSessionId || ev.replayUrl ? (
-                  <Link
-                    href={`/replay/${bay.id}`}
-                    className="press bg-[#e3a008] px-4 py-2 text-[11px] tracking-widest text-[#121416]"
-                  >
-                    WATCH REPLAY
-                  </Link>
-                ) : null}
-              </div>
+                  Evidence only · not a verdict
+                </span>
+              )}
+            </div>
+            <p className="mt-2 truncate text-sm text-[var(--fog)]" title={`${bay.repo.owner}/${bay.repo.name}`}>
+              {bay.repo.owner}/{bay.repo.name}
+              {bay.isSelf ? " · this app" : ""}
+            </p>
+            {summary ? (
+              <p className="mt-1 text-[11px] tracking-[0.12em] text-[var(--mute)]">{summary}</p>
             ) : null}
           </div>
-        </div>
+
+          {ev ? (
+            <div className="flex flex-wrap gap-2 sm:justify-end">
+              <a
+                href={`/api/bays/${bay.id}/export`}
+                className="press border border-[var(--line)] px-3 py-2 text-[11px] tracking-[0.18em] text-[var(--fog)] hover:border-[var(--amber)] hover:text-[var(--amber)]"
+              >
+                EXPORT JSON
+              </a>
+              {ev.browserSessionId || ev.replayUrl ? (
+                <Link
+                  href={`/replay/${bay.id}`}
+                  className="press bg-[var(--amber)] px-3 py-2 text-[11px] tracking-widest text-[#121416] hover:bg-[var(--amber-deep)] hover:text-[#f3ead8]"
+                >
+                  WATCH REPLAY
+                </Link>
+              ) : null}
+            </div>
+          ) : null}
+        </header>
 
         {dryRun ? (
-          <div className="mt-6">
+          <div className="mt-5">
             <DryRunNotice />
           </div>
         ) : null}
 
         {bay.isSelf && measured ? (
-          <p className="mt-6 text-[11px] leading-5 text-[var(--mute)]">
+          <p className="mt-5 text-[11px] leading-5 text-[var(--mute)]">
             Self-review: the Forklift inside this sandbox ran without a Solari key, so the recording shows its UI in
             dry run. The live evidence for Forklift is the floor you just came from.
           </p>
         ) : null}
 
         {bay.error ? (
-          <p className="mt-6 border border-[var(--bad)] p-4 text-sm text-[var(--bad)]">{bay.error}</p>
+          <p className="mt-5 break-words border border-[var(--bad)] p-4 text-sm text-[var(--bad)]">{bay.error}</p>
         ) : null}
 
         {!ev ? (
           <p className="mt-10 text-sm text-[var(--mute)]">Still {bay.status}.</p>
         ) : (
-          <div className="mt-8 grid gap-5">
+          <div className="card-stack mt-6">
             <Artifact ev={ev} bayId={bay.id} hasScreenshot={bay.hasScreenshot} repoName={bay.repo.name} />
 
-            <div className="grid gap-5 lg:grid-cols-2">
+            <div className="card-split">
+              <Section title="Criteria">
+                <ul>
+                  {ev.criteria.map((c) => (
+                    <Criterion key={c.label} c={c} />
+                  ))}
+                </ul>
+              </Section>
+
               <Section title="Run">
                 <dl>
                   {(
                     [
-                      ["REPO", bay.repo.url, bay.repo.url],
+                      ["REPO", shortRepo(bay.repo.url), bay.repo.url],
                       ["AHEAD", bay.repo.aheadBy != null ? `${bay.repo.aheadBy} commits` : null, undefined],
                       ["MODE", measured ? (ev.kind ?? "server") + (ev.cwd ? ` · ${ev.cwd}` : "") : nm, undefined],
                       [
@@ -238,41 +272,35 @@ export default async function CardPage({ params }: { params: Promise<{ bayId: st
                   )
                     .filter(([, v]) => v !== null && v !== undefined)
                     .map(([k, v, href]) => (
-                    <div key={k} className="mrow">
-                      <dt>{k}</dt>
-                      <span className="dots" />
-                      <dd>
-                        {href ? (
-                          <a href={href} className="text-[var(--amber)]">
-                            {v}
-                          </a>
-                        ) : (
-                          v
-                        )}
-                      </dd>
-                    </div>
-                  ))}
+                      <div key={k} className="mrow">
+                        <dt>{k}</dt>
+                        <span className="dots" aria-hidden />
+                        <dd title={href || v || undefined}>
+                          {href ? (
+                            <a href={href} className="text-[var(--amber)]">
+                              {v}
+                            </a>
+                          ) : (
+                            v
+                          )}
+                        </dd>
+                      </div>
+                    ))}
                 </dl>
                 {ev.browserSessionId || ev.replayUrl ? (
                   <p className="mt-4 border-t border-[var(--line-soft)] pt-4 text-[11px] text-[var(--mute)]">
                     <Link href={`/replay/${bay.id}`} className="text-[var(--amber)]">
                       Watch recording →
                     </Link>
-                    {ev.browserSessionId ? <span className="ml-2 opacity-70">session {ev.browserSessionId.slice(-12)}</span> : null}
+                    {ev.browserSessionId ? (
+                      <span className="ml-2 opacity-70">session {ev.browserSessionId.slice(-12)}</span>
+                    ) : null}
                   </p>
                 ) : null}
               </Section>
-
-              <Section title="Criteria">
-                <ul>
-                  {ev.criteria.map((c) => (
-                    <Criterion key={c.label} c={c} />
-                  ))}
-                </ul>
-              </Section>
             </div>
 
-            <div className="grid gap-5 lg:grid-cols-2">
+            <div className="card-split">
               <Section title="Solari">
                 {measured || bay.isSelf ? (
                   <div className="flex flex-wrap gap-2">
@@ -285,7 +313,7 @@ export default async function CardPage({ params }: { params: Promise<{ bayId: st
                   <p className="text-sm text-[var(--mute)]">Source not scanned in a dry run.</p>
                 )}
                 {ev.solari.packages.length > 0 ? (
-                  <p className="mt-3 text-[11px] text-[var(--mute)]">
+                  <p className="mt-3 break-words text-[11px] text-[var(--mute)]">
                     packages: {ev.solari.packages.join(", ")}
                   </p>
                 ) : null}
@@ -298,46 +326,46 @@ export default async function CardPage({ params }: { params: Promise<{ bayId: st
                 {!measured && !bay.isSelf ? (
                   <p className="text-sm text-[var(--mute)]">Not read in a dry run.</p>
                 ) : (
-                <dl>
-                  <div className="mrow">
-                    <dt>START</dt>
-                    <span className="dots" />
-                    <dd>{ev.readme.claimedStart ?? "none"}</dd>
-                  </div>
-                  <div className="mrow">
-                    <dt>FOUND</dt>
-                    <span className="dots" />
-                    <dd>{ev.readme.startExists ? "yes" : "no"}</dd>
-                  </div>
-                  <div className="mrow">
-                    <dt>PORT</dt>
-                    <span className="dots" />
-                    <dd>{ev.readme.claimedPort ?? "none"}</dd>
-                  </div>
-                  <div className="mrow">
-                    <dt>MATCHES</dt>
-                    <span className="dots" />
-                    <dd>{ev.readme.portMatched ? "yes" : "no"}</dd>
-                  </div>
-                  <div className="mrow">
-                    <dt>NAMES SOLARI</dt>
-                    <span className="dots" />
-                    <dd>{ev.readme.mentionsSolari ? "yes" : "no"}</dd>
-                  </div>
-                </dl>
+                  <dl>
+                    <div className="mrow">
+                      <dt>START</dt>
+                      <span className="dots" aria-hidden />
+                      <dd>{ev.readme.claimedStart ?? "none"}</dd>
+                    </div>
+                    <div className="mrow">
+                      <dt>FOUND</dt>
+                      <span className="dots" aria-hidden />
+                      <dd>{ev.readme.startExists ? "yes" : "no"}</dd>
+                    </div>
+                    <div className="mrow">
+                      <dt>PORT</dt>
+                      <span className="dots" aria-hidden />
+                      <dd>{ev.readme.claimedPort ?? "none"}</dd>
+                    </div>
+                    <div className="mrow">
+                      <dt>MATCHES</dt>
+                      <span className="dots" aria-hidden />
+                      <dd>{ev.readme.portMatched ? "yes" : "no"}</dd>
+                    </div>
+                    <div className="mrow">
+                      <dt>NAMES SOLARI</dt>
+                      <span className="dots" aria-hidden />
+                      <dd>{ev.readme.mentionsSolari ? "yes" : "no"}</dd>
+                    </div>
+                  </dl>
                 )}
               </Section>
             </div>
 
             {measured && ev.kind !== "script" ? (
-              <div className="grid gap-5 lg:grid-cols-2">
+              <div className="card-split">
                 <Section title={`Console · ${ev.consoleErrors.length}`}>
-                  <pre className="term max-h-64 p-3">
+                  <pre className="term max-h-56 p-3">
                     {ev.consoleErrors.slice(0, 40).join("\n") || (ev.previewUrl ? "clean" : "no browser pass")}
                   </pre>
                 </Section>
                 <Section title={`Network · ${ev.networkErrors.length}`}>
-                  <pre className="term max-h-64 p-3">
+                  <pre className="term max-h-56 p-3">
                     {ev.networkErrors.slice(0, 40).join("\n") || (ev.previewUrl ? "clean" : "no browser pass")}
                   </pre>
                 </Section>
@@ -352,24 +380,23 @@ export default async function CardPage({ params }: { params: Promise<{ bayId: st
                   fetched in a dry run.
                 </p>
               ) : ev.diff.files.length > 0 ? (
-                <div className="text-sm">
+                <div className="min-w-0 text-sm">
                   <p className="mb-3 text-[var(--mute)]">
                     <span style={{ color: "var(--ok)" }}>+{ev.diff.insertions}</span>{" "}
-                    <span style={{ color: "var(--bad)" }}>−{ev.diff.deletions}</span> across{" "}
-                    {ev.diff.filesChanged} files
+                    <span style={{ color: "var(--bad)" }}>−{ev.diff.deletions}</span> across {ev.diff.filesChanged}{" "}
+                    files
                   </p>
                   {ev.diff.newTopLevel.length > 0 ? (
-                    <p className="mb-3 text-[11px] tracking-[0.1em] text-[var(--amber)]">
+                    <p className="mb-3 break-words text-[11px] tracking-[0.1em] text-[var(--amber)]">
                       NEW TOP-LEVEL: {ev.diff.newTopLevel.join(" · ")}
                     </p>
                   ) : null}
-                  <ul>
+                  <ul className="diff-list">
                     {ev.diff.files.map((f) => (
-                      <li
-                        key={f.path}
-                        className="flex justify-between gap-4 border-b border-[var(--line-soft)] py-1.5 text-[var(--fog)] last:border-none"
-                      >
-                        <span className="min-w-0 truncate">{f.path}</span>
+                      <li key={f.path} className="diff-row">
+                        <span className="min-w-0 truncate" title={f.path}>
+                          {f.path}
+                        </span>
                         <span className="flex-none text-[10px] tracking-[0.15em] uppercase text-[var(--mute)]">
                           {f.status}
                         </span>
@@ -383,7 +410,7 @@ export default async function CardPage({ params }: { params: Promise<{ bayId: st
             </Section>
 
             <Section title="Log">
-              <pre className="term max-h-72 p-3">{bay.logs.join("\n") || "quiet"}</pre>
+              <pre className="term max-h-64 p-3">{bay.logs.join("\n") || "quiet"}</pre>
             </Section>
           </div>
         )}
