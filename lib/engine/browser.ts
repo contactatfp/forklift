@@ -1,13 +1,40 @@
 import { browserClient } from "@/lib/solari/clients";
+import { previewPath } from "@/lib/engine/preview";
 import type { DemoStep } from "@/lib/types";
 import { log } from "@/lib/log";
 
 export type BrowserPass = {
   screenshot: Uint8Array | null;
   replayUrl: string | null;
+  /** Solari browser session id; lets the card mint a fresh replay URL after the presigned one expires. */
+  sessionId: string | null;
   consoleErrors: string[];
   networkErrors: string[];
 };
+
+/** Replay is documented as ~1–3s after release; in production the 404 lasted the whole 18s we gave it. */
+const REPLAY_WAIT_MS = 45_000;
+
+export async function fetchReplayUrl(sessionId: string, waitMs = 0): Promise<string | null> {
+  const client = browserClient();
+  const started = Date.now();
+  try {
+    for (;;) {
+      try {
+        const replay = await client.sessions.getReplayUrl(sessionId);
+        return replay.url;
+      } catch (err) {
+        if (Date.now() - started >= waitMs) {
+          log("replay.unavailable", { sessionId, err: String(err) });
+          return null;
+        }
+        await sleep(2_000);
+      }
+    }
+  } finally {
+    await client.close().catch(() => undefined);
+  }
+}
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -42,9 +69,7 @@ export async function recordPreview(input: {
 
     for (const step of steps) {
       if (step.action === "goto") {
-        const url = step.path.startsWith("http")
-          ? step.path
-          : new URL(step.path || "/", input.previewUrl).toString();
+        const url = previewPath(input.previewUrl, step.path || "/");
         // networkidle never settles on HMR/websocket apps — capture after DOM ready
         await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 });
         pageOpened = true;
@@ -70,22 +95,13 @@ export async function recordPreview(input: {
     // browser.close() already releaseAndWait — a second DELETE 404s and can wipe the shot
     const sessionId = browser.id;
     await browser.close();
-
-    for (let i = 0; i < 12; i++) {
-      try {
-        const replay = await client.sessions.getReplayUrl(sessionId);
-        replayUrl = replay.url;
-        break;
-      } catch (err) {
-        log("replay.poll", { i, err: String(err) });
-        await sleep(1500);
-      }
-    }
-
     await client.close();
+
+    replayUrl = await fetchReplayUrl(sessionId, REPLAY_WAIT_MS);
     return {
       screenshot,
       replayUrl,
+      sessionId,
       consoleErrors: consoleErrors.slice(0, 50),
       networkErrors: networkErrors.slice(0, 50),
     };
@@ -116,6 +132,7 @@ export async function recordPreview(input: {
       return {
         screenshot,
         replayUrl: null,
+        sessionId: browser.id,
         consoleErrors: consoleErrors.slice(0, 50),
         networkErrors: networkErrors.slice(0, 50),
       };

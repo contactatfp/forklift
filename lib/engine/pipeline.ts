@@ -11,6 +11,7 @@ import {
   type DetectedStack,
 } from "@/lib/detect/stack";
 import { recordPreview } from "@/lib/engine/browser";
+import { previewPath } from "@/lib/engine/preview";
 import { getHub } from "@/lib/engine/events";
 import { isLocalRepo, packLocalTree } from "@/lib/engine/pack";
 import { log } from "@/lib/log";
@@ -266,7 +267,7 @@ async function waitForPreview(
   let lastStatus = 0;
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(new URL(health || "/", url).toString(), { redirect: "follow" });
+      const res = await fetch(previewPath(url, health || "/"), { redirect: "follow" });
       // the gateway answers 502/503/504 while nothing is bound; anything else means the
       // app itself spoke, and a 404 on "/" from an API-only server is still a live server
       if (res.status < 500) {
@@ -597,6 +598,7 @@ export async function reviewBay(input: {
     let previewUp = false;
     let screenshot: Uint8Array | null = null;
     let replayUrl: string | null = null;
+    let browserSessionId: string | null = null;
     let consoleErrors: string[] = [];
     let networkErrors: string[] = [];
     let script: ScriptRun | null = null;
@@ -681,12 +683,14 @@ export async function reviewBay(input: {
           });
           screenshot = pass.screenshot;
           replayUrl = pass.replayUrl;
+          browserSessionId = pass.sessionId;
           consoleErrors = pass.consoleErrors;
           networkErrors = pass.networkErrors;
           if (screenshot) await store.setScreenshot(input.bay.id, screenshot);
+          if (browserSessionId) await logBay(input.bay, `browser session ${browserSessionId}`);
           if (!screenshot) await logBay(input.bay, "browser pass finished with no screenshot");
           else if (replayUrl) await logBay(input.bay, "replay ready");
-          else await logBay(input.bay, "screenshot saved · replay missing");
+          else await logBay(input.bay, "screenshot saved · replay not published yet (card retries on open)");
         } catch (err) {
           await logBay(input.bay, `browser pass failed: ${String(err)}`);
         }
@@ -705,6 +709,7 @@ export async function reviewBay(input: {
       previewUrl,
       previewUp,
       replayUrl,
+      browserSessionId,
       consoleErrors,
       networkErrors,
       solari: solari ?? EMPTY_SOLARI,

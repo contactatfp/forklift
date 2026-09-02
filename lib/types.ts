@@ -122,6 +122,8 @@ export type Evidence = {
   /** Did the health path ever answer 200? false = a URL existed but nothing was ever recorded. */
   previewUp?: boolean;
   replayUrl: string | null;
+  /** Solari browser session id. Presigned replay URLs expire; the card mints a fresh one from this. */
+  browserSessionId?: string | null;
   consoleErrors: string[];
   networkErrors: string[];
   solari: SolariDetection;
