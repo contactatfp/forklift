@@ -345,21 +345,48 @@ body::after {
 }
 
 /* rrweb-player ships a white light theme; sit it on the bezel without fighting its layout */
+/* its selectors are svelte-scoped (3 class hashes), so these need the extra weight */
 .replay-host .rr-player {
   margin: 0 auto;
+  float: none;
   background: #0b0d0f;
+  border-radius: 0;
   box-shadow: none;
 }
-.replay-host .rr-controller {
+.replay-host .rr-player .rr-controller[class] {
   background: #121416;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
   color: var(--fog);
 }
-.replay-host .rr-controller__btns button {
+.replay-host .rr-player .rr-timeline__time[class] {
+  color: var(--fog);
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+}
+.replay-host .rr-player .rr-progress[class] {
+  background: #23282d;
+  border-color: #121416;
+}
+.replay-host .rr-player .rr-progress__step[class] {
+  background: #5a4a1a;
+}
+.replay-host .rr-player .rr-progress__handler[class] {
+  background: var(--amber);
+}
+.replay-host .rr-player .rr-controller__btns[class] button[class] {
   color: var(--fog);
 }
-.replay-host .rr-controller__btns button.active {
+.replay-host .rr-player .rr-controller__btns[class] button.active[class] {
   background: var(--amber);
   color: #121416;
+}
+.replay-host .rr-player .switch[class] label[class]::before {
+  background: #3a3f45;
+}
+.replay-host .rr-player .switch[class] input:checked + label[class]::before {
+  background: var(--amber);
 }
 
 /* dry-run band: hazard-striped edge so nobody mistakes an unmeasured card for evidence */
