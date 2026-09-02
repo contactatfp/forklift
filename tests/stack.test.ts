@@ -16,6 +16,15 @@ describe("detectStack", () => {
     expect(stack.install).toBe("npm install");
   });
 
+  it("bootstraps pnpm/yarn through corepack when the lockfile asks for them", () => {
+    const pnpm = detectStack({ "package.json": "{}", "pnpm-lock.yaml": "lockfileVersion: 9" });
+    expect(pnpm.install).toMatch(/corepack enable/);
+    expect(pnpm.install).toMatch(/pnpm install --frozen-lockfile/);
+    const yarn = detectStack({ "package.json": "{}", "yarn.lock": "# yarn lockfile v1" });
+    expect(yarn.install).toMatch(/corepack enable/);
+    expect(yarn.install).toMatch(/yarn install/);
+  });
+
   it("picks the Node major the guest asks for, else current LTS", () => {
     expect(desiredNodeMajor({})).toBe(22);
     expect(desiredNodeMajor({ ".nvmrc": "20.11.0\n" })).toBe(20);

@@ -165,8 +165,12 @@ export function detectStack(files: Record<string, string>, opts?: { cwd?: string
     const scripts = pkg.scripts ?? {};
     const deps = { ...pkg.dependencies, ...pkg.devDependencies };
     if (!install) {
-      if (files["pnpm-lock.yaml"]) install = "pnpm install --frozen-lockfile || pnpm install";
-      else if (files["yarn.lock"]) install = "yarn install --frozen-lockfile || yarn install";
+      // the base image has npm only; corepack (bundled with Node 16+) fetches pnpm/yarn on first use.
+      // A live fork under fleet/ died with "pnpm: not found" before this.
+      if (files["pnpm-lock.yaml"])
+        install = "(command -v pnpm >/dev/null || corepack enable) && (pnpm install --frozen-lockfile || pnpm install)";
+      else if (files["yarn.lock"])
+        install = "(command -v yarn >/dev/null || corepack enable) && (yarn install --frozen-lockfile || yarn install)";
       else if (files["package-lock.json"]) install = "npm ci || npm install";
       else install = "npm install";
     }
