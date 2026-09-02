@@ -76,15 +76,27 @@ class Budget {
   }
 }
 
-async function logBay(bay: Bay, line: string) {
-  const store = await getStore();
-  const clean = scrub(line);
-  await store.appendLog(bay.id, clean);
-  getHub().publish(bay.jobId, { type: "log", jobId: bay.jobId, bayId: bay.id, line: clean });
+// one writer per bay: appendLog is read-modify-write and npm floods it from onStdout
+const logQueues = new Map<string, Promise<void>>();
+
+function logBay(bay: Bay, line: string): Promise<void> {
+  const prev = logQueues.get(bay.id) ?? Promise.resolve();
+  const next = prev
+    .catch(() => undefined)
+    .then(async () => {
+      const store = await getStore();
+      const clean = scrub(line);
+      // keep the in-memory bay current so a later upsertBay doesn't wipe the log
+      bay.logs = await store.appendLog(bay.id, clean);
+      getHub().publish(bay.jobId, { type: "log", jobId: bay.jobId, bayId: bay.id, line: clean });
+    });
+  logQueues.set(bay.id, next);
+  return next;
 }
 
 async function setStatus(bay: Bay, status: Bay["status"]) {
   const store = await getStore();
+  await logQueues.get(bay.id);
   const next = { ...bay, status, updatedAt: Date.now() };
   await store.upsertBay(next);
   Object.assign(bay, next);
@@ -412,6 +424,17 @@ export async function reviewBay(input: {
     await store.upsertBay(input.bay);
     getHub().publish(input.bay.jobId, { type: "bay", bay: { ...input.bay } });
 
+    // what the guest actually ran on — half of "works on my machine" is right here
+    try {
+      const tool = await sh(sbx, "echo node $(node -v 2>/dev/null || echo none) · npm $(npm -v 2>/dev/null || echo none) · $(python3 --version 2>/dev/null || echo 'python none')", {
+        timeoutMs: budget.cap(10_000),
+      });
+      const line = tool.stdout.trim();
+      if (line) await logBay(input.bay, `toolchain ${line}`);
+    } catch {
+      /* cosmetic */
+    }
+
     let buildOk = true;
     let buildCode: number | null = 0;
     let buildSummary = "no install step";
@@ -464,6 +487,7 @@ export async function reviewBay(input: {
     }
 
     let previewUrl: string | null = null;
+    let previewUp = false;
     let screenshot: Uint8Array | null = null;
     let replayUrl: string | null = null;
     let consoleErrors: string[] = [];
@@ -513,10 +537,13 @@ export async function reviewBay(input: {
         HOST: "0.0.0.0",
       };
       if (input.bay.isSelf) env.FORKLIFT_FIXTURE = "1";
+      // stream the server's own output into the log so a crash on boot is visible on the card
       await sbx.commands.start("sh", {
         args: ["-c", stack.start],
         cwd,
         env,
+        onStdout: (d) => onLog(d),
+        onStderr: (d) => onLog(d),
       });
       const preview = await sbx.previewUrl(stack.port);
       previewUrl = preview.url;
@@ -532,6 +559,7 @@ export async function reviewBay(input: {
         previewUrl = wait.url;
         await logBay(input.bay, `preview ${previewUrl}`);
       }
+      previewUp = wait.up;
       if (!wait.up) {
         await logBay(input.bay, `preview never returned 200 on ${stack.health || "/"} — skipping browser recording`);
       }
@@ -569,6 +597,7 @@ export async function reviewBay(input: {
       script,
       diff,
       previewUrl,
+      previewUp,
       replayUrl,
       consoleErrors,
       networkErrors,
@@ -578,7 +607,7 @@ export async function reviewBay(input: {
         solari,
         testsOk,
         secrets: secretsFound,
-        preview: Boolean(previewUrl),
+        preview: previewUp,
         script,
         measured: true,
       }),

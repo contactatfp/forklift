@@ -13,7 +13,7 @@ function sleep(ms: number) {
 
 async function logBay(bay: Bay, line: string) {
   const store = await getStore();
-  await store.appendLog(bay.id, line);
+  bay.logs = await store.appendLog(bay.id, line);
   getHub().publish(bay.jobId, { type: "log", jobId: bay.jobId, bayId: bay.id, line });
 }
 

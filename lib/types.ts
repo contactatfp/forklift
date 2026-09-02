@@ -119,6 +119,8 @@ export type Evidence = {
   script?: ScriptRun | null;
   diff: DiffEvidence;
   previewUrl: string | null;
+  /** Did the health path ever answer 200? false = a URL existed but nothing was ever recorded. */
+  previewUp?: boolean;
   replayUrl: string | null;
   consoleErrors: string[];
   networkErrors: string[];

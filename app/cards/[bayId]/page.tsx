@@ -63,7 +63,11 @@ function Artifact({ ev, bayId, hasScreenshot, repoName }: { ev: Evidence; bayId:
         <img src={`/api/bays/${bayId}/screenshot`} alt={`${repoName} preview screenshot`} className="w-full" />
       ) : (
         <p className="p-10 text-center text-sm text-[var(--mute)]">
-          {ev.previewUrl ? "Preview came up but the browser pass left no screenshot." : "No preview, so no screenshot."}
+          {!ev.previewUrl
+            ? "No start command, so no preview and no screenshot."
+            : ev.previewUp === false
+              ? "The app started but never answered 200 on its health path. No browser pass. Check the log."
+              : "Preview came up but the browser pass left no screenshot."}
         </p>
       )}
     </section>
@@ -208,7 +212,17 @@ export default async function CardPage({ params }: { params: Promise<{ bayId: st
                       ["REPO", bay.repo.url, bay.repo.url],
                       ["AHEAD", bay.repo.aheadBy != null ? `${bay.repo.aheadBy} commits` : null, undefined],
                       ["MODE", measured ? (ev.kind ?? "server") + (ev.cwd ? ` · ${ev.cwd}` : "") : nm, undefined],
-                      ["PREVIEW", measured ? (ev.previewUrl ? `${ev.previewUrl} (sandbox closed)` : "none") : nm, undefined],
+                      [
+                        "PREVIEW",
+                        measured
+                          ? ev.previewUrl
+                            ? ev.previewUp === false
+                              ? "started, never answered"
+                              : "answered 200 (sandbox since closed)"
+                            : "none"
+                          : nm,
+                        undefined,
+                      ],
                       ["STACK", measured ? (ev.manifestUsed ? `${ev.stack} · forklift.yaml` : ev.stack) : nm, undefined],
                       ["BUILD", measured ? (ev.build.ok ? "ok" : "failed") : nm, undefined],
                       ["TESTS", measured ? (ev.tests.ran ? (ev.tests.ok ? "ok" : "failed") : "none") : nm, undefined],
