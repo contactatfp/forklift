@@ -11,9 +11,13 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
-import type { Bay, BayStatus, EngineEvent, Job } from "@/lib/types";
+import type { Bay, BayStatus, EngineEvent, Job, RunKind } from "@/lib/types";
+import { DryRunNotice } from "@/app/dry-run-notice";
 
-const STEPS: Array<{ key: BayStatus; label: string }> = [
+type Step = { key: BayStatus; label: string };
+
+// servers get a browser walk; scripts run once and hand back a transcript
+const SERVER_STEPS: Step[] = [
   { key: "cloning", label: "CLONE" },
   { key: "scanning", label: "SCAN" },
   { key: "installing", label: "INSTALL" },
@@ -23,6 +27,14 @@ const STEPS: Array<{ key: BayStatus; label: string }> = [
   { key: "recording", label: "REC" },
 ];
 
+const SCRIPT_STEPS: Step[] = [
+  { key: "cloning", label: "CLONE" },
+  { key: "scanning", label: "SCAN" },
+  { key: "installing", label: "INSTALL" },
+  { key: "testing", label: "TEST" },
+  { key: "running", label: "RUN" },
+];
+
 function lampColor(status: BayStatus) {
   if (status === "done") return "var(--ok)";
   if (status === "failed") return "var(--bad)";
@@ -30,7 +42,8 @@ function lampColor(status: BayStatus) {
   return "var(--amber)";
 }
 
-function StepRail({ status }: { status: BayStatus }) {
+function StepRail({ status, mode }: { status: BayStatus; mode: RunKind | null }) {
+  const STEPS = mode === "script" ? SCRIPT_STEPS : SERVER_STEPS;
   const idx = STEPS.findIndex((s) => s.key === status);
   const current = status === "done" ? STEPS.length : idx;
   const dead = status === "failed";
@@ -60,7 +73,7 @@ function LogPane({ logs }: { logs: string[] }) {
   }, [logs]);
   return (
     <pre ref={ref} className="term mx-3 mb-3 h-36 flex-none p-3">
-      {(logs.length ? logs : ["awaiting dispatch…"]).slice(-60).join("\n")}
+      {(logs.length ? logs : ["queued"]).slice(-60).join("\n")}
     </pre>
   );
 }
@@ -92,14 +105,14 @@ function BayDoor({ bay, i }: { bay: Bay; i: number }) {
           <p className="mt-1 text-[10px] tracking-[0.25em] text-[var(--amber)]">SELF · FORKLIFT</p>
         ) : null}
       </div>
-      <StepRail status={bay.status} />
+      <StepRail status={bay.status} mode={bay.mode ?? bay.evidence?.kind ?? null} />
       <LogPane logs={bay.logs} />
     </article>
   );
 
   if (href) {
     return (
-      <Link href={href} className="block h-full transition-transform hover:-translate-y-0.5">
+      <Link href={href} className="press block h-full">
         {door}
       </Link>
     );
@@ -113,7 +126,7 @@ function EmptyDoor({ n }: { n: number }) {
       <div className="hazard" style={{ height: 6 }} />
       <div className="px-4 pt-3">
         <span className="stencil text-4xl">{String(n).padStart(2, "0")}</span>
-        <p className="mt-8 text-[10px] tracking-[0.25em] text-[var(--mute)]">DOOR EMPTY</p>
+        <p className="mt-8 text-[10px] tracking-[0.25em] text-[var(--mute)]">EMPTY</p>
       </div>
     </article>
   );
@@ -137,7 +150,7 @@ function ShiftClock() {
 function Odometer({ value }: { value: number | null | undefined }) {
   const text = value === null || value === undefined ? "···" : String(value);
   return (
-    <span className="odo" title="forks on the network">
+    <span className="odo" title="forks found">
       {text.split("").map((ch, i) => (
         <b key={i}>{ch}</b>
       ))}
@@ -168,13 +181,21 @@ function applyEvent(
   }
 }
 
-export function FloorClient({ jobId }: { jobId: string }) {
-  const [job, setJob] = useState<Job | null>(null);
-  const [bays, setBays] = useState<Bay[]>([]);
+export function FloorClient({
+  jobId,
+  initialJob,
+  initialBays,
+}: {
+  jobId: string;
+  initialJob: Job;
+  initialBays: Bay[];
+}) {
+  const [job, setJob] = useState<Job | null>(initialJob);
+  const [bays, setBays] = useState<Bay[]>(initialBays);
 
   useEffect(() => {
     let closed = false;
-    // rest first so a finished job still paints, then sse for the live bits
+    // refresh in case SSR was slightly stale; SSE carries the live bits
     void (async () => {
       try {
         const res = await fetch(`/api/jobs/${jobId}`);
@@ -236,7 +257,7 @@ export function FloorClient({ jobId }: { jobId: string }) {
     doors = (
       <div className="max-w-md">
         <EmptyDoor n={1} />
-        <p className="mt-3 text-[11px] tracking-[0.15em] text-[var(--mute)]">AWAITING DOOR…</p>
+        <p className="mt-3 text-[11px] tracking-[0.15em] text-[var(--mute)]">Starting…</p>
       </div>
     );
   } else if (job.status === "queued" || job.status === "discovering") {
@@ -248,13 +269,13 @@ export function FloorClient({ jobId }: { jobId: string }) {
           ))}
         </div>
         <p className="mt-3 text-[11px] tracking-[0.15em] text-[var(--mute)]">
-          DISCOVERING NETWORK…
+          FINDING FORKS…
         </p>
       </div>
     );
   } else {
     doors = (
-      <p className="text-sm text-[var(--mute)]">Awaiting doors…</p>
+      <p className="text-sm text-[var(--mute)]">Starting…</p>
     );
   }
 
@@ -267,16 +288,16 @@ export function FloorClient({ jobId }: { jobId: string }) {
             <Link href="/" className="stencil text-2xl text-[#f3ead8] hover:text-[var(--amber)]">
               FORKLIFT
             </Link>
-            <span className="text-[10px] tracking-[0.3em] text-[var(--mute)]">DISPATCH FLOOR</span>
+            <span className="text-[10px] tracking-[0.3em] text-[var(--mute)]">FLOOR</span>
             {job?.fixture ? (
               <span className="stamp text-[10px]" style={{ color: "var(--amber)" }}>
-                FIXTURE · not live Solari
+                DRY RUN
               </span>
             ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-6 text-[11px] tracking-[0.15em] text-[var(--mute)]">
-            <span className="flex items-center gap-2">
-              NETWORK <Odometer value={job?.forkCount} />
+            <span>
+              FORKS <Odometer value={job?.forkCount} />
             </span>
             <span>
               BAYS{" "}
@@ -284,12 +305,16 @@ export function FloorClient({ jobId }: { jobId: string }) {
                 {done}/{bayTotal || expectedBays}
               </b>
             </span>
-            <span className="uppercase">
-              {job?.fixture ? "fixture run" : "live run"} · {job?.status ?? "…"}
-            </span>
+            <span className="uppercase">{job?.status ?? "…"}</span>
             <ShiftClock />
           </div>
         </div>
+
+        {job?.fixture ? (
+          <div className="mb-6">
+            <DryRunNotice />
+          </div>
+        ) : null}
 
         {job?.error ? <p className="mb-6 max-w-2xl text-sm text-[var(--bad)]">{job.error}</p> : null}
 

@@ -1,9 +1,10 @@
 name: Forklift
 stack: node
-install: npm install
+kind: server
+install: npm ci && npm run build
 start: npm run start
 port: 3000
-health: /
+health: /api/health
 demo:
   - action: goto
     path: /
@@ -11,4 +12,4 @@ demo:
     text: FORKLIFT
     timeoutMs: 20000
   - action: screenshot
-timeoutMinutes: 5
+timeoutMinutes: 6

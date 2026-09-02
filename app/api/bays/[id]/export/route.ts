@@ -10,13 +10,15 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const store = await getStore();
   const bay = await store.getBay(id);
   if (!bay) return NextResponse.json({ error: "not found" }, { status: 404 });
+  const job = await store.getJob(bay.jobId);
   const png = await store.getScreenshot(id);
   const screenshot = png ? `data:image/png;base64,${Buffer.from(png).toString("base64")}` : null;
   return NextResponse.json({
     exportedAt: new Date().toISOString(),
+    note: "Evidence only. Forklift does not rank candidates or recommend a hire.",
     ranking: null,
     hire: null,
-    note: "Evidence only. Forklift does not rank candidates.",
+    dryRun: Boolean(job?.fixture) || bay.evidence?.measured === false,
     bay,
     screenshot,
   });

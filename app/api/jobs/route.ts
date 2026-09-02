@@ -60,12 +60,19 @@ export async function POST(request: Request) {
     typeof rec.criteria === "string" && rec.criteria.trim()
       ? parseCriteria(rec.criteria)
       : DEFAULT_CRITERIA;
-  const selfRepo =
+  const rawSelf =
     rec.includeSelf === false
       ? "skip"
       : typeof rec.selfRepo === "string" && rec.selfRepo.trim()
         ? rec.selfRepo.trim()
         : "local";
+  // blank/local on the slip → optional FORKLIFT_SELF_REPO override (GitHub label)
+  const selfRepo =
+    rawSelf === "skip"
+      ? "skip"
+      : rawSelf === "local" || rawSelf === "."
+        ? process.env.FORKLIFT_SELF_REPO?.trim() || "local"
+        : rawSelf;
   const verifyUrl = typeof rec.verifyUrl === "string" ? rec.verifyUrl.trim() : undefined;
 
   if (kind === "verify" && !verifyUrl) {

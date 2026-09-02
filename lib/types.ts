@@ -14,12 +14,16 @@ export type BayStatus =
   | "installing"
   | "testing"
   | "building"
+  | "running"
   | "preview"
   | "recording"
   | "done"
   | "failed";
 
 export type StackKind = "node" | "python" | "unknown";
+
+/** server: something listens on a port and gets a recorded browser walk. script: runs to completion, transcript is the artifact. */
+export type RunKind = "server" | "script";
 
 export type DemoStep =
   | { action: "goto"; path: string }
@@ -30,6 +34,9 @@ export type DemoStep =
 export type ForkliftManifest = {
   name?: string;
   stack?: StackKind;
+  kind?: RunKind;
+  /** Subdirectory the commands run in. Relative to the repo root. */
+  cwd?: string;
   install?: string;
   start?: string;
   port?: number;
@@ -53,6 +60,12 @@ export type ForkHit = GithubRepo & {
   stars: number;
   aheadBy: number | null;
   changedFiles: number | null;
+};
+
+/** What a bay knows about its repo. Compare numbers come from GitHub and survive a dry run. */
+export type BayRepo = GithubRepo & {
+  aheadBy?: number | null;
+  changedFiles?: number | null;
 };
 
 export type DiffEvidence = {
@@ -85,10 +98,25 @@ export type CriterionResult =
   | { label: string; kind: "auto"; met: boolean; note: string }
   | { label: string; kind: "manual"; note: string };
 
+export type ScriptRun = {
+  command: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  /** The script reads SOLARI_API_KEY. We never hand ours to guest code, so a non-zero exit is not judged. */
+  needsKey: boolean;
+  transcript: string;
+};
+
 export type Evidence = {
   stack: StackKind;
+  /** false on a dry run: nothing below was actually cloned, built, or recorded. */
+  measured?: boolean;
+  kind?: RunKind;
+  /** Subdirectory that was reviewed (examples/foo). Empty for the repo root. */
+  cwd?: string;
   build: { ok: boolean; exitCode: number | null; summary: string };
   tests: { ran: boolean; ok: boolean | null; summary: string };
+  script?: ScriptRun | null;
   diff: DiffEvidence;
   previewUrl: string | null;
   replayUrl: string | null;
@@ -119,9 +147,11 @@ export type Bay = {
   id: string;
   jobId: string;
   bay: number;
-  repo: GithubRepo;
+  repo: BayRepo;
   isSelf: boolean;
   status: BayStatus;
+  /** Known once detection runs; drives which step rail the floor paints. */
+  mode: RunKind | null;
   logs: string[];
   evidence: Evidence | null;
   hasScreenshot: boolean;

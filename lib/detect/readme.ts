@@ -1,5 +1,5 @@
 import type { DetectedStack } from "@/lib/detect/stack";
-import type { ReadmeCheck, SolariDetection } from "@/lib/types";
+import type { ReadmeCheck, ScriptRun, SolariDetection } from "@/lib/types";
 
 export function checkReadme(readme: string, stack: DetectedStack, solari: SolariDetection): ReadmeCheck {
   const startMatch = readme.match(/`((?:npm|pnpm|yarn|pip|python|uvicorn|flask)[^`]+)`/);
@@ -23,10 +23,25 @@ export function checkReadme(readme: string, stack: DetectedStack, solari: Solari
   };
 }
 
-export function evaluateCriteria(
-  lines: string[],
-  input: { solari: SolariDetection; testsOk: boolean | null; secrets: string[]; preview: boolean },
-) {
+export type CriteriaInput = {
+  solari: SolariDetection;
+  testsOk: boolean | null;
+  secrets: string[];
+  preview: boolean;
+  /** Present when the bay ran a script instead of serving a port. */
+  script?: ScriptRun | null;
+  /** false on a dry run: nothing was measured, so every line is a LOOK. */
+  measured?: boolean;
+};
+
+export function evaluateCriteria(lines: string[], input: CriteriaInput) {
+  if (input.measured === false) {
+    return lines.map((label) => ({
+      label,
+      kind: "manual" as const,
+      note: "Dry run: not measured.",
+    }));
+  }
   return lines.map((label) => {
     const l = label.toLowerCase();
     if (l.includes("record")) {
@@ -34,7 +49,7 @@ export function evaluateCriteria(
         label,
         kind: "auto" as const,
         met: input.solari.recording,
-        note: input.solari.recording ? "Recording API used." : "No recording:true / replay call.",
+        note: input.solari.recording ? "Found a recording call." : "No recording call.",
       };
     }
     if (l.includes("sandbox")) {
@@ -42,7 +57,7 @@ export function evaluateCriteria(
         label,
         kind: "auto" as const,
         met: input.solari.sandbox,
-        note: input.solari.sandbox ? "Sandbox SDK import found." : "No sandbox SDK import.",
+        note: input.solari.sandbox ? "Sandbox import found." : "No sandbox import.",
       };
     }
     if (l.includes("browser")) {
@@ -50,7 +65,7 @@ export function evaluateCriteria(
         label,
         kind: "auto" as const,
         met: input.solari.browser,
-        note: input.solari.browser ? "Browser SDK import found." : "No browser SDK import.",
+        note: input.solari.browser ? "Browser import found." : "No browser import.",
       };
     }
     if (l.includes("secret")) {
@@ -58,7 +73,7 @@ export function evaluateCriteria(
         label,
         kind: "auto" as const,
         met: input.secrets.length === 0,
-        note: input.secrets.length === 0 ? "No committed secrets detected." : input.secrets.join("; "),
+        note: input.secrets.length === 0 ? "None committed." : input.secrets.join("; "),
       };
     }
     if (l.includes("test")) {
@@ -68,20 +83,39 @@ export function evaluateCriteria(
         met: input.testsOk === true,
         note:
           input.testsOk === true
-            ? "Tests ran and passed."
+            ? "Passed."
             : input.testsOk === false
-              ? "Tests ran and failed."
-              : "No tests ran.",
+              ? "Failed."
+              : "None ran.",
       };
     }
     if (l.includes("preview") || l.includes("live")) {
+      if (input.script) {
+        return { label, kind: "manual" as const, note: "Script, not a server. No preview expected." };
+      }
       return {
         label,
         kind: "auto" as const,
         met: input.preview,
-        note: input.preview ? "Preview URL came up." : "No live preview.",
+        note: input.preview ? "Preview came up." : "No preview URL.",
       };
     }
-    return { label, kind: "manual" as const, note: "Needs a human look." };
+    if (input.script && /\bruns?\b|complet|exit/.test(l)) {
+      const s = input.script;
+      if (s.needsKey) {
+        return {
+          label,
+          kind: "manual" as const,
+          note: `Reads SOLARI_API_KEY; not run with ours. Exit ${s.exitCode ?? "?"} not judged.`,
+        };
+      }
+      return {
+        label,
+        kind: "auto" as const,
+        met: s.exitCode === 0 && !s.timedOut,
+        note: s.timedOut ? "Timed out." : s.exitCode === 0 ? "Ran to completion, exit 0." : `Exit ${s.exitCode ?? "?"}.`,
+      };
+    }
+    return { label, kind: "manual" as const, note: input.script ? "Read the transcript." : "Open the screenshot." };
   });
 }

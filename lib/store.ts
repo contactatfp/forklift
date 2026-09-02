@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS bays (
   screenshot BLOB,
   error TEXT,
   sandbox_id TEXT,
+  mode TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -62,11 +63,15 @@ CREATE TABLE IF NOT EXISTS bays (
   screenshot BYTEA,
   error TEXT,
   sandbox_id TEXT,
+  mode TEXT,
   created_at BIGINT NOT NULL,
   updated_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS bays_job ON bays(job_id);
 `;
+
+const BAY_COLS =
+  "id, job_id, bay, repo_json, is_self, status, logs, evidence, error, sandbox_id, mode, created_at, updated_at";
 
 type JobRow = {
   id: string;
@@ -93,6 +98,7 @@ type BayRow = {
   evidence: string | null;
   error: string | null;
   sandbox_id: string | null;
+  mode: string | null;
   created_at: number | string;
   updated_at: number | string;
 };
@@ -136,6 +142,7 @@ function bayFromRow(row: BayRow, hasScreenshot: boolean): Bay {
     repo: repoUnknown as Bay["repo"],
     isSelf: asBool(row.is_self),
     status: row.status as BayStatus,
+    mode: row.mode === "server" || row.mode === "script" ? row.mode : null,
     logs: Array.isArray(logsUnknown)
       ? logsUnknown.filter((item): item is string => typeof item === "string")
       : [],
@@ -184,6 +191,11 @@ class SqliteStore implements Store {
   constructor(db: SqliteDatabase) {
     this.db = db;
     this.db.exec(SQLITE_DDL);
+    try {
+      this.db.exec("ALTER TABLE bays ADD COLUMN mode TEXT");
+    } catch {
+      /* column already there */
+    }
   }
 
   async createJob(job: Job) {
@@ -238,14 +250,15 @@ class SqliteStore implements Store {
   async upsertBay(bay: Bay) {
     this.db
       .prepare(
-        `INSERT INTO bays (id, job_id, bay, repo_json, is_self, status, logs, evidence, error, sandbox_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO bays (${BAY_COLS})
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            status = excluded.status,
            logs = excluded.logs,
            evidence = excluded.evidence,
            error = excluded.error,
            sandbox_id = excluded.sandbox_id,
+           mode = excluded.mode,
            updated_at = excluded.updated_at`,
       )
       .run(
@@ -259,6 +272,7 @@ class SqliteStore implements Store {
         bay.evidence ? JSON.stringify(bay.evidence) : null,
         bay.error,
         bay.sandboxId,
+        bay.mode,
         bay.createdAt,
         bay.updatedAt,
       );
@@ -266,9 +280,7 @@ class SqliteStore implements Store {
 
   async getBay(id: string) {
     const row = this.db
-      .prepare(
-        "SELECT id, job_id, bay, repo_json, is_self, status, logs, evidence, error, sandbox_id, created_at, updated_at, screenshot IS NOT NULL AS has_shot FROM bays WHERE id = ?",
-      )
+      .prepare(`SELECT ${BAY_COLS}, screenshot IS NOT NULL AS has_shot FROM bays WHERE id = ?`)
       .get(id) as (BayRow & { has_shot: number }) | undefined;
     if (!row) return null;
     return bayFromRow(row, Boolean(row.has_shot));
@@ -276,9 +288,7 @@ class SqliteStore implements Store {
 
   async listBays(jobId: string) {
     const rows = this.db
-      .prepare(
-        "SELECT id, job_id, bay, repo_json, is_self, status, logs, evidence, error, sandbox_id, created_at, updated_at, screenshot IS NOT NULL AS has_shot FROM bays WHERE job_id = ? ORDER BY bay ASC",
-      )
+      .prepare(`SELECT ${BAY_COLS}, screenshot IS NOT NULL AS has_shot FROM bays WHERE job_id = ? ORDER BY bay ASC`)
       .all(jobId) as Array<BayRow & { has_shot: number }>;
     return rows.map((row) => bayFromRow(row, Boolean(row.has_shot)));
   }
@@ -349,6 +359,7 @@ class PostgresStore implements Store {
       ALTER TABLE jobs ALTER COLUMN updated_at TYPE BIGINT;
       ALTER TABLE bays ALTER COLUMN created_at TYPE BIGINT;
       ALTER TABLE bays ALTER COLUMN updated_at TYPE BIGINT;
+      ALTER TABLE bays ADD COLUMN IF NOT EXISTS mode TEXT;
     `);
   }
 
@@ -398,14 +409,15 @@ class PostgresStore implements Store {
 
   async upsertBay(bay: Bay) {
     await this.pool.query(
-      `INSERT INTO bays (id, job_id, bay, repo_json, is_self, status, logs, evidence, error, sandbox_id, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+      `INSERT INTO bays (${BAY_COLS})
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
        ON CONFLICT (id) DO UPDATE SET
          status = EXCLUDED.status,
          logs = EXCLUDED.logs,
          evidence = EXCLUDED.evidence,
          error = EXCLUDED.error,
          sandbox_id = EXCLUDED.sandbox_id,
+         mode = EXCLUDED.mode,
          updated_at = EXCLUDED.updated_at`,
       [
         bay.id,
@@ -418,6 +430,7 @@ class PostgresStore implements Store {
         bay.evidence ? JSON.stringify(bay.evidence) : null,
         bay.error,
         bay.sandboxId,
+        bay.mode,
         bay.createdAt,
         bay.updatedAt,
       ],
@@ -426,8 +439,7 @@ class PostgresStore implements Store {
 
   async getBay(id: string) {
     const res = await this.pool.query(
-      `SELECT id, job_id, bay, repo_json, is_self, status, logs, evidence, error, sandbox_id, created_at, updated_at,
-              (screenshot IS NOT NULL) AS has_shot FROM bays WHERE id = $1`,
+      `SELECT ${BAY_COLS}, (screenshot IS NOT NULL) AS has_shot FROM bays WHERE id = $1`,
       [id],
     );
     const row = res.rows[0] as (BayRow & { has_shot: boolean }) | undefined;
@@ -437,8 +449,7 @@ class PostgresStore implements Store {
 
   async listBays(jobId: string) {
     const res = await this.pool.query(
-      `SELECT id, job_id, bay, repo_json, is_self, status, logs, evidence, error, sandbox_id, created_at, updated_at,
-              (screenshot IS NOT NULL) AS has_shot FROM bays WHERE job_id = $1 ORDER BY bay ASC`,
+      `SELECT ${BAY_COLS}, (screenshot IS NOT NULL) AS has_shot FROM bays WHERE job_id = $1 ORDER BY bay ASC`,
       [jobId],
     );
     return (res.rows as Array<BayRow & { has_shot: boolean }>).map((row) =>
@@ -500,7 +511,7 @@ class PostgresStore implements Store {
 }
 
 // bump when Store shape changes so HMR doesn't keep a stale singleton
-const STORE_GEN = 2;
+const STORE_GEN = 3;
 
 const globalForStore = globalThis as unknown as {
   forkliftStore?: Promise<Store>;

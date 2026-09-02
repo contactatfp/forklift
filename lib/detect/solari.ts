@@ -57,3 +57,24 @@ export function detectSolari(files: Record<string, string>): SolariDetection {
     importHits: [...new Set(importHits)].slice(0, 20),
   };
 }
+
+/** OR two detections together — repo root plus the example dir we actually ran. */
+export function mergeSolari(a: SolariDetection, b: SolariDetection): SolariDetection {
+  return {
+    sandbox: a.sandbox || b.sandbox,
+    browser: a.browser || b.browser,
+    desktop: a.desktop || b.desktop,
+    recording: a.recording || b.recording,
+    packages: [...new Set([...a.packages, ...b.packages])],
+    importHits: [...new Set([...a.importHits, ...b.importHits])].slice(0, 20),
+  };
+}
+
+export const EMPTY_SOLARI: SolariDetection = {
+  sandbox: false,
+  browser: false,
+  desktop: false,
+  recording: false,
+  packages: [],
+  importHits: [],
+};

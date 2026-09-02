@@ -21,6 +21,10 @@ export async function recordPreview(input: {
   const client = browserClient();
   const consoleErrors: string[] = [];
   const networkErrors: string[] = [];
+  let screenshot: Uint8Array | null = null;
+  let replayUrl: string | null = null;
+  let pageOpened = false;
+
   const browser = await client.launch({ recording: true });
   try {
     const page = await browser.newPage();
@@ -35,14 +39,16 @@ export async function recordPreview(input: {
     });
 
     const steps = input.demo.length > 0 ? input.demo : [{ action: "goto" as const, path: input.health || "/" }];
-    let screenshot: Uint8Array | null = null;
 
     for (const step of steps) {
       if (step.action === "goto") {
         const url = step.path.startsWith("http")
           ? step.path
           : new URL(step.path || "/", input.previewUrl).toString();
-        await page.goto(url, { waitUntil: "networkidle", timeout: 45_000 });
+        // networkidle never settles on HMR/websocket apps — capture after DOM ready
+        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 });
+        pageOpened = true;
+        await sleep(800);
       } else if (step.action === "click") {
         if (step.selector) await page.locator(step.selector).click({ timeout: 10_000 });
         else if (step.text) await page.getByText(step.text).first().click({ timeout: 10_000 });
@@ -56,16 +62,15 @@ export async function recordPreview(input: {
       }
     }
 
-    if (!screenshot) {
+    if (!screenshot && pageOpened) {
       const png = await page.screenshot({ fullPage: true, type: "png" });
       screenshot = png;
     }
 
+    // browser.close() already releaseAndWait — a second DELETE 404s and can wipe the shot
     const sessionId = browser.id;
     await browser.close();
-    await client.sessions.releaseAndWait(sessionId);
 
-    let replayUrl: string | null = null;
     for (let i = 0; i < 12; i++) {
       try {
         const replay = await client.sessions.getReplayUrl(sessionId);
@@ -78,14 +83,43 @@ export async function recordPreview(input: {
     }
 
     await client.close();
-    return { screenshot, replayUrl, consoleErrors: consoleErrors.slice(0, 50), networkErrors: networkErrors.slice(0, 50) };
+    return {
+      screenshot,
+      replayUrl,
+      consoleErrors: consoleErrors.slice(0, 50),
+      networkErrors: networkErrors.slice(0, 50),
+    };
   } catch (err) {
+    // last-ditch shot if the page opened before the throw
+    if (!screenshot && pageOpened) {
+      try {
+        const ctx = browser.contexts()[0];
+        const page = ctx?.pages()[0];
+        if (page) screenshot = await page.screenshot({ fullPage: true, type: "png" });
+      } catch {
+        /* page already gone */
+      }
+    }
     try {
       await browser.close();
     } catch {
       /* already closed */
     }
-    await client.close();
+    try {
+      await client.close();
+    } catch {
+      /* ignore */
+    }
+    // keep a partial pass so the pipeline can still stamp the PNG
+    if (screenshot) {
+      log("browser.partial", { err: String(err) });
+      return {
+        screenshot,
+        replayUrl: null,
+        consoleErrors: consoleErrors.slice(0, 50),
+        networkErrors: networkErrors.slice(0, 50),
+      };
+    }
     throw err;
   }
 }

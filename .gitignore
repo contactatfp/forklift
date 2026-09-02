@@ -33,6 +33,12 @@ yarn-error.log*
 /data/*.sqlite
 /data/*.sqlite-journal
 /data/*.sqlite-wal
+/data/*.db
+
+# secrets — the Solari key lives here, never in git
+.env
+.env.local
+.env.*.local
 
 
 # vercel

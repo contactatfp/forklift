@@ -17,11 +17,15 @@
   --paper-edge: #d9cdae;
   --ink: #26231c;
   --stamp: #b3402f;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 @theme inline {
   --font-display: var(--font-display);
   --font-mono: var(--font-mono);
+  --font-sketch: var(--font-sketch);
 }
 
 * {
@@ -90,11 +94,12 @@ body::after {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  /* last stop must go transparent or the pseudo-element paints an opaque sheet over the door */
   background-image:
-    radial-gradient(circle 3px at 14px 14px, #3c444c 1.5px, #0c0e10 3px),
-    radial-gradient(circle 3px at calc(100% - 14px) 14px, #3c444c 1.5px, #0c0e10 3px),
-    radial-gradient(circle 3px at 14px calc(100% - 14px), #3c444c 1.5px, #0c0e10 3px),
-    radial-gradient(circle 3px at calc(100% - 14px) calc(100% - 14px), #3c444c 1.5px, #0c0e10 3px);
+    radial-gradient(circle 3px at 14px 14px, #3c444c 1.5px, #0c0e10 3px, transparent 3.5px),
+    radial-gradient(circle 3px at calc(100% - 14px) 14px, #3c444c 1.5px, #0c0e10 3px, transparent 3.5px),
+    radial-gradient(circle 3px at 14px calc(100% - 14px), #3c444c 1.5px, #0c0e10 3px, transparent 3.5px),
+    radial-gradient(circle 3px at calc(100% - 14px) calc(100% - 14px), #3c444c 1.5px, #0c0e10 3px, transparent 3.5px);
 }
 
 .lamp {
@@ -105,8 +110,9 @@ body::after {
   box-shadow: 0 0 8px currentColor;
 }
 
-.lamp-live {
-  animation: lamp-pulse 1.3s ease-in-out infinite;
+.lamp-live,
+.step.active .tick {
+  animation: lamp-pulse 2s linear infinite;
 }
 
 @keyframes lamp-pulse {
@@ -115,8 +121,21 @@ body::after {
     opacity: 1;
   }
   50% {
-    opacity: 0.25;
+    opacity: 0.7;
   }
+}
+
+.press {
+  transition:
+    transform 160ms var(--ease-out),
+    background-color 150ms ease,
+    color 150ms ease,
+    border-color 150ms ease,
+    opacity 160ms var(--ease-out);
+}
+
+.press:active {
+  transform: scale(0.97);
 }
 
 .term {
@@ -205,18 +224,18 @@ body::after {
 /* ---------- floor ---------- */
 
 .bay-in {
-  animation: bay-rise 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
-  animation-delay: calc(var(--i, 0) * 90ms);
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  transition:
+    opacity 200ms var(--ease-out),
+    transform 200ms var(--ease-out);
+  transition-delay: calc(var(--i, 0) * 50ms);
 }
 
-@keyframes bay-rise {
-  from {
+@starting-style {
+  .bay-in {
     opacity: 0;
-    transform: translateY(14px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
+    transform: translateY(8px) scale(0.97);
   }
 }
 
@@ -253,7 +272,6 @@ body::after {
 
 .step.active .tick {
   background: var(--amber);
-  animation: lamp-pulse 1.2s ease-in-out infinite;
 }
 
 .step.active span {
@@ -326,6 +344,37 @@ body::after {
   padding: 12px;
 }
 
+/* dry-run band: hazard-striped edge so nobody mistakes an unmeasured card for evidence */
+.notice {
+  position: relative;
+  border: 1px solid var(--amber);
+  background: rgba(227, 160, 8, 0.07);
+  padding: 12px 16px 12px 22px;
+  color: var(--fog);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.notice::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 8px;
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--amber),
+    var(--amber) 5px,
+    #121416 5px,
+    #121416 10px
+  );
+}
+
+.notice b {
+  color: var(--amber);
+  letter-spacing: 0.18em;
+  font-size: 10px;
+}
+
 .stamp-yes {
   color: var(--ok);
 }
@@ -338,8 +387,299 @@ body::after {
   color: var(--mute);
 }
 
+/* ---------- verify: hand-sketched fork graph ---------- */
+
+.fork-sketch {
+  --ink-line: rgba(38, 35, 28, 0.82);
+  --ink-faint: rgba(38, 35, 28, 0.28);
+  position: relative;
+  font-family: var(--font-sketch), ui-rounded, cursive;
+}
+
+.fork-sketch .sketch-kicker {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  opacity: 0.45;
+}
+
+/* GitHub-style fork graph: root bottom-left, next commit top-left, your fork top-right */
+.fork-graph {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(120px, 0.9fr) minmax(160px, 1.2fr);
+  grid-template-rows: auto 88px auto;
+  column-gap: 0.5rem;
+  align-items: start;
+}
+
+.fg-tl {
+  grid-column: 1;
+  grid-row: 1;
+  position: relative;
+  z-index: 1;
+  padding-left: 4px;
+}
+
+.fg-tr {
+  grid-column: 2;
+  grid-row: 1;
+  position: relative;
+  z-index: 1;
+  justify-self: stretch;
+  padding-top: 2px;
+}
+
+.fg-stem {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  min-height: 88px;
+}
+
+.fg-bl {
+  grid-column: 1;
+  grid-row: 3;
+  position: relative;
+  z-index: 1;
+  padding-left: 4px;
+}
+
+.fork-svg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.sketch-node {
+  position: relative;
+  width: 100%;
+  max-width: 240px;
+  padding: 12px 14px 10px;
+  color: var(--ink);
+  background: rgba(255, 252, 244, 0.72);
+  border: 2px solid var(--ink-line);
+  border-radius: 3px 5px 2px 4px;
+  box-shadow:
+    1px 1px 0 var(--ink-line),
+    inset 0 -10px 12px rgba(38, 35, 28, 0.04);
+}
+
+.sketch-dot {
+  display: block;
+  width: 14px;
+  height: 14px;
+  margin-bottom: 6px;
+  border: 2px solid var(--ink-line);
+  border-radius: 50%;
+  background: rgba(255, 252, 244, 0.9);
+  box-shadow: 0.5px 0.5px 0 var(--ink-line);
+}
+
+.sketch-dot-solid {
+  background: var(--ink-line);
+  box-shadow: none;
+}
+
+.sketch-node-ghost {
+  width: 108px;
+  padding: 10px 10px 8px;
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--ink-faint);
+  box-shadow: none;
+  transform: rotate(-2deg);
+  pointer-events: none;
+}
+
+.sketch-node-ghost .sketch-kicker {
+  letter-spacing: 0.12em;
+}
+
+.sketch-node-ghost .sketch-dot {
+  border-style: dashed;
+  border-color: var(--ink-faint);
+  background: transparent;
+  box-shadow: none;
+}
+
+.sketch-node-up {
+  transform: rotate(-0.8deg);
+}
+
+.sketch-node-fork {
+  max-width: none;
+  transform: rotate(0.6deg);
+  opacity: 0.7;
+  background: transparent;
+  border-style: dashed;
+  box-shadow: none;
+  transition:
+    opacity 180ms var(--ease-out),
+    background-color 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.sketch-node-fork .sketch-dot {
+  border-style: dashed;
+  border-color: var(--ink-faint);
+  background: transparent;
+  box-shadow: none;
+  transition:
+    border-color 180ms ease,
+    background-color 180ms ease;
+}
+
+.fork-graph[data-formed="true"] .sketch-node-fork {
+  opacity: 1;
+  background: rgba(255, 252, 244, 0.78);
+  border-style: solid;
+  box-shadow: 1px 1px 0 var(--ink-line);
+}
+
+.fork-graph[data-formed="true"] .sketch-node-fork .sketch-dot {
+  border-style: solid;
+  border-color: var(--ink-line);
+  background: var(--ink-line);
+}
+
+.sketch-name {
+  display: block;
+  margin-top: 2px;
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: 0.01em;
+  word-break: break-word;
+}
+
+.sketch-field {
+  width: 100%;
+  margin-top: 4px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(38, 35, 28, 0.35);
+  padding: 2px 0;
+  font-family: var(--font-sketch), ui-rounded, cursive;
+  font-size: 0.88rem;
+  color: var(--ink);
+  outline: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sketch-field:focus {
+  border-bottom-color: var(--ink);
+}
+
+.sketch-field::placeholder {
+  color: rgba(38, 35, 28, 0.28);
+}
+
+.fork-ink {
+  fill: none;
+  stroke: var(--ink-line);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.fork-dash {
+  fill: none;
+  stroke: var(--ink-faint);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 4 6;
+  vector-effect: non-scaling-stroke;
+}
+
+.fork-branch-ghost {
+  transition: opacity 160ms ease;
+}
+
+.fork-our {
+  fill: none;
+  stroke: var(--ink-line);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;
+  transition: opacity 180ms var(--ease-out);
+  vector-effect: non-scaling-stroke;
+}
+
+.fork-graph[data-formed="true"] .fork-our {
+  opacity: 1;
+}
+
+.fork-graph[data-formed="true"] .fork-branch-ghost {
+  opacity: 0;
+}
+
+.fork-note {
+  margin-top: 14px;
+  font-size: 1.15rem;
+  color: rgba(38, 35, 28, 0.5);
+  text-align: center;
+}
+
+@media (max-width: 520px) {
+  .fork-graph {
+    grid-template-columns: 1fr 1.15fr;
+    grid-template-rows: auto 72px auto;
+  }
+
+  .fg-stem {
+    min-height: 72px;
+  }
+
+  .sketch-name {
+    font-size: 1.15rem;
+  }
+}
+
 input,
 textarea,
 button {
   font-family: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bay-in {
+    transition: opacity 160ms ease;
+    transition-delay: 0ms;
+    transform: none;
+  }
+
+  @starting-style {
+    .bay-in {
+      opacity: 0;
+      transform: none;
+    }
+  }
+
+  .press:active {
+    transform: none;
+    opacity: 0.85;
+  }
+
+  .lamp-live,
+  .step.active .tick {
+    animation: none;
+  }
+
+  .fork-our,
+  .fork-branch-ghost,
+  .sketch-node-fork,
+  .sketch-node-fork .sketch-dot {
+    transition-duration: 0ms;
+  }
 }

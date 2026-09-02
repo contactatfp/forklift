@@ -1,4 +1,4 @@
-import { detectSolari } from "@/lib/detect/solari";
+import { EMPTY_SOLARI, detectSolari } from "@/lib/detect/solari";
 import { checkReadme, evaluateCriteria } from "@/lib/detect/readme";
 import { detectStack } from "@/lib/detect/stack";
 import { getHub } from "@/lib/engine/events";
@@ -17,16 +17,20 @@ async function logBay(bay: Bay, line: string) {
   getHub().publish(bay.jobId, { type: "log", jobId: bay.jobId, bayId: bay.id, line });
 }
 
+/**
+ * Dry run: no Solari key, so no sandbox, no clone, no build, no browser.
+ * Everything on the card is either real (fork name, GitHub ahead-by count, this
+ * app's own source) or explicitly marked not measured. Nothing is invented.
+ */
 export async function fixtureBay(input: { bay: Bay; criteria: string[] }): Promise<void> {
   const store = await getStore();
   const steps: Array<[Bay["status"], string]> = [
-    ["cloning", `clone ${input.bay.repo.cloneUrl}`],
-    ["scanning", "secret scan clean"],
-    ["installing", "npm install"],
-    ["testing", "tests skipped in fixture mode"],
-    ["building", input.bay.isSelf ? "next build (fixture)" : "build"],
-    ["preview", "preview http://fixture.local"],
-    ["recording", "recording browser session"],
+    ["cloning", "dry run · no sandbox, nothing cloned"],
+    ["scanning", "dry run · secret scan not run"],
+    ["installing", "dry run · install not run"],
+    ["building", "dry run · build not run"],
+    ["preview", "dry run · no preview"],
+    ["recording", "dry run · no recording"],
   ];
 
   for (const [status, line] of steps) {
@@ -35,12 +39,20 @@ export async function fixtureBay(input: { bay: Bay; criteria: string[] }): Promi
     await store.upsertBay(input.bay);
     getHub().publish(input.bay.jobId, { type: "bay", bay: { ...input.bay } });
     await logBay(input.bay, line);
-    await sleep(350 + Math.random() * 400);
+    await sleep(150 + Math.random() * 200);
   }
 
+  // self bay: the only thing we can read for real is this app's own tree
   const localFiles: Record<string, string> = {};
   if (input.bay.isSelf) {
-    const names = ["package.json", "forklift.yaml", "README.md"];
+    const names = [
+      "package.json",
+      "forklift.yaml",
+      "README.md",
+      "lib/engine/pipeline.ts",
+      "lib/engine/browser.ts",
+      "lib/solari/clients.ts",
+    ];
     for (const name of names) {
       try {
         localFiles[name] = await readFile(join(/* turbopackIgnore: true */ process.cwd(), name), "utf8");
@@ -48,58 +60,30 @@ export async function fixtureBay(input: { bay: Bay; criteria: string[] }): Promi
         /* missing */
       }
     }
-    try {
-      localFiles["lib/engine/pipeline.ts"] = await readFile(
-        join(/* turbopackIgnore: true */ process.cwd(), "lib/engine/pipeline.ts"),
-        "utf8",
-      );
-    } catch {
-      /* ignore */
-    }
-    try {
-      localFiles["lib/engine/browser.ts"] = await readFile(
-        join(/* turbopackIgnore: true */ process.cwd(), "lib/engine/browser.ts"),
-        "utf8",
-      );
-    } catch {
-      /* ignore */
-    }
-    try {
-      localFiles["lib/solari/clients.ts"] = await readFile(
-        join(/* turbopackIgnore: true */ process.cwd(), "lib/solari/clients.ts"),
-        "utf8",
-      );
-    } catch {
-      /* ignore */
-    }
   }
 
   const stack = detectStack(localFiles);
-  // only self gets a real local Solari detect; guest forks stay unknown in fixture
   const solari = input.bay.isSelf
     ? detectSolari(localFiles)
-    : {
-        sandbox: false,
-        browser: false,
-        desktop: false,
-        recording: false,
-        packages: [],
-        importHits: ["fixture: no live scan — Solari not claimed"],
-      };
+    : { ...EMPTY_SOLARI, importHits: ["dry run · source not scanned"] };
+
+  const ahead = input.bay.repo.aheadBy ?? null;
+  const changed = input.bay.repo.changedFiles ?? null;
 
   const evidence: Evidence = {
-    stack: stack.stack === "unknown" ? "node" : stack.stack,
-    build: { ok: true, exitCode: 0, summary: "fixture build (synthetic)" },
-    tests: { ran: false, ok: null, summary: "fixture mode does not run guest tests" },
+    stack: input.bay.isSelf ? stack.stack : "unknown",
+    measured: false,
+    kind: input.bay.isSelf ? stack.kind : undefined,
+    build: { ok: false, exitCode: null, summary: "dry run · not measured" },
+    tests: { ran: false, ok: null, summary: "dry run · not measured" },
+    script: null,
     diff: {
-      filesChanged: input.bay.isSelf ? 40 : 12,
-      insertions: input.bay.isSelf ? 2200 : 480,
-      deletions: 30,
-      files: [
-        { path: "README.md", status: "M" },
-        { path: input.bay.isSelf ? "lib/engine/pipeline.ts" : "examples/app.ts", status: "A" },
-      ],
-      newTopLevel: input.bay.isSelf ? ["app", "lib", "forklift.yaml"] : ["src"],
+      // straight from the GitHub compare API — real, but only a count
+      filesChanged: changed ?? 0,
+      insertions: 0,
+      deletions: 0,
+      files: [],
+      newTopLevel: [],
     },
     previewUrl: null,
     replayUrl: null,
@@ -112,15 +96,23 @@ export async function fixtureBay(input: { bay: Bay; criteria: string[] }): Promi
       testsOk: null,
       secrets: [],
       preview: false,
+      measured: false,
     }),
     secretsFound: [],
-    manifestUsed: Boolean(stack.manifest) || input.bay.isSelf,
+    manifestUsed: Boolean(stack.manifest),
   };
 
   await store.setEvidence(input.bay.id, evidence, { status: "done", error: null });
   input.bay.status = "done";
   input.bay.evidence = evidence;
+  input.bay.mode = evidence.kind ?? null;
   input.bay.updatedAt = Date.now();
+  await store.upsertBay(input.bay);
   getHub().publish(input.bay.jobId, { type: "bay", bay: { ...input.bay } });
-  await logBay(input.bay, input.bay.isSelf ? "FORKLIFT card closed" : "bay closed");
+  await logBay(
+    input.bay,
+    ahead === null
+      ? "dry run closed · nothing measured"
+      : `dry run closed · GitHub says ${ahead} commit${ahead === 1 ? "" : "s"} ahead, ${changed ?? "?"} files changed`,
+  );
 }

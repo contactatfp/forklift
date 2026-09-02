@@ -46,16 +46,19 @@ export function RecentFloors() {
   }, []);
 
   useEffect(() => {
-    void load();
+    const first = setTimeout(() => void load(), 0);
     const onFocus = () => void load();
     window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+    return () => {
+      clearTimeout(first);
+      window.removeEventListener("focus", onFocus);
+    };
   }, [load]);
 
   if (denied) {
     return (
       <p className="mt-8 max-w-md text-[11px] tracking-[0.12em] text-[var(--mute)]">
-        RECENT FLOORS · enter access key on the slip to list past jobs
+        RECENT FLOORS · enter the access key to see them
       </p>
     );
   }
@@ -81,7 +84,7 @@ export function RecentFloors() {
                   {label}
                 </span>
                 <span className="flex-none text-[10px] tracking-[0.12em] uppercase text-[var(--mute)]">
-                  {job.fixture ? "fixture · " : ""}
+                  {job.fixture ? "dry run · " : ""}
                   {job.status}
                 </span>
               </Link>

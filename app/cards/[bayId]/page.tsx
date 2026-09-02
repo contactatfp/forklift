@@ -1,12 +1,78 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getStore } from "@/lib/store";
-import type { CriterionResult } from "@/lib/types";
-import { OpenPreview } from "./open-preview";
+import type { CriterionResult, Evidence } from "@/lib/types";
+import { DryRunNotice } from "@/app/dry-run-notice";
+
+function facts(ev: Evidence): string {
+  if (ev.measured === false) {
+    return ev.diff.filesChanged ? `not measured · ${ev.diff.filesChanged} files changed on GitHub` : "not measured";
+  }
+  const auto = ev.criteria.filter((c) => c.kind === "auto");
+  const yes = auto.filter((c) => c.met).length;
+  const look = ev.criteria.filter((c) => c.kind === "manual").length;
+  const bits: string[] = [];
+  if (auto.length) bits.push(`${yes}/${auto.length} checks`);
+  if (look) bits.push(`${look} to look at`);
+  if (ev.diff.filesChanged) bits.push(`${ev.diff.filesChanged} files`);
+  if (ev.kind === "script") bits.push("script");
+  return bits.join(" · ");
+}
+
+/** What the applicant shipped: a recorded page, or a program that ran to completion. */
+function Artifact({ ev, bayId, hasScreenshot, repoName }: { ev: Evidence; bayId: string; hasScreenshot: boolean; repoName: string }) {
+  if (ev.measured === false) {
+    return (
+      <section className="bezel">
+        <p className="p-10 text-center text-sm text-[var(--mute)]">Dry run. No sandbox, no browser, no artifact.</p>
+      </section>
+    );
+  }
+  if (ev.kind === "script" && ev.script) {
+    const s = ev.script;
+    const verdict = s.timedOut
+      ? "TIMED OUT"
+      : s.needsKey
+        ? `EXIT ${s.exitCode ?? "?"} · NOT JUDGED`
+        : `EXIT ${s.exitCode ?? "?"}`;
+    return (
+      <section className="bezel">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-2 pb-3 text-[10px] tracking-[0.2em] text-[var(--mute)]">
+          <span>
+            $ <span className="text-[var(--fog)]">{s.command}</span>
+            {ev.cwd ? <span className="ml-2 opacity-70">in {ev.cwd}</span> : null}
+          </span>
+          <span style={{ color: s.timedOut || (s.exitCode !== 0 && !s.needsKey) ? "var(--bad)" : s.needsKey ? "var(--amber)" : "var(--ok)" }}>
+            {verdict}
+          </span>
+        </div>
+        <pre className="term max-h-[28rem] p-4">{s.transcript || "(no output)"}</pre>
+        {s.needsKey ? (
+          <p className="px-2 pt-3 text-[11px] leading-5 text-[var(--mute)]">
+            This program reads <code>SOLARI_API_KEY</code>. Forklift never hands its own key to guest code, so the
+            exit code above is not held against the submission. Run it with your key to judge it.
+          </p>
+        ) : null}
+      </section>
+    );
+  }
+  return (
+    <section className="bezel">
+      {hasScreenshot ? (
+        // eslint-disable-next-line @next/next/no-img-element -- PNG straight out of our own DB, no loader wanted
+        <img src={`/api/bays/${bayId}/screenshot`} alt={`${repoName} preview screenshot`} className="w-full" />
+      ) : (
+        <p className="p-10 text-center text-sm text-[var(--mute)]">
+          {ev.previewUrl ? "Preview came up but the browser pass left no screenshot." : "No preview, so no screenshot."}
+        </p>
+      )}
+    </section>
+  );
+}
 
 function Criterion({ c }: { c: CriterionResult }) {
   const state = c.kind === "manual" ? "man" : c.met ? "yes" : "no";
-  const label = c.kind === "manual" ? "HUMAN" : c.met ? "YES" : "NO";
+  const label = c.kind === "manual" ? "LOOK" : c.met ? "YES" : "NO";
   return (
     <li className="flex items-center justify-between gap-4 border-b border-[var(--line-soft)] py-3 last:border-none">
       <div className="min-w-0">
@@ -49,6 +115,10 @@ export default async function CardPage({ params }: { params: Promise<{ bayId: st
   if (!bay) notFound();
   const job = bay.jobId ? await store.getJob(bay.jobId) : null;
   const ev = bay.evidence;
+  const summary = ev ? facts(ev) : "";
+  const dryRun = Boolean(job?.fixture) || ev?.measured === false;
+  const measured = Boolean(ev) && !dryRun;
+  const nm = "not measured";
 
   return (
     <main className="flex min-h-svh flex-col">
@@ -60,76 +130,93 @@ export default async function CardPage({ params }: { params: Promise<{ bayId: st
               href={bay.jobId ? `/floor/${bay.jobId}` : "/"}
               className="text-[10px] tracking-[0.3em] text-[var(--mute)] hover:text-[var(--amber)]"
             >
-              ← DISPATCH FLOOR
+              ← FLOOR
             </Link>
             <h1 className="stencil mt-3 text-5xl text-[#f3ead8]">
               BAY {String(bay.bay).padStart(2, "0")}
             </h1>
             <p className="mt-2 text-sm text-[var(--fog)]">
               {bay.repo.owner}/{bay.repo.name}
-              {bay.isSelf ? " · forklift itself" : ""}
+              {bay.isSelf ? " · this app" : ""}
             </p>
+            {summary ? (
+              <p className="mt-2 text-[11px] tracking-[0.12em] text-[var(--mute)]">{summary}</p>
+            ) : null}
           </div>
           <div className="flex flex-col items-end gap-3">
-            {job?.fixture ? (
-              <span className="stamp text-xs" style={{ color: "var(--amber)" }}>
-                FIXTURE · not live Solari
+            <div className="flex flex-wrap items-center justify-end gap-3">
+              {dryRun ? (
+                <span className="stamp text-xs" style={{ color: "var(--amber)" }}>
+                  DRY RUN
+                </span>
+              ) : null}
+              <span className="stamp text-[10px]" style={{ color: "var(--mute)", transform: "rotate(2deg)" }}>
+                Evidence only · not a verdict
               </span>
-            ) : null}
-            <span className="stamp text-xs" style={{ color: "var(--amber)" }}>
-              Evidence only · not a verdict
-            </span>
+            </div>
             {ev ? (
               <div className="flex gap-3">
                 <a
                   href={`/api/bays/${bay.id}/export`}
-                  className="border border-[var(--line)] px-4 py-2 text-[11px] tracking-[0.18em] text-[var(--fog)] hover:border-[var(--amber)] hover:text-[var(--amber)]"
+                  className="press border border-[var(--line)] px-4 py-2 text-[11px] tracking-[0.18em] text-[var(--fog)] hover:border-[var(--amber)] hover:text-[var(--amber)]"
                 >
                   EXPORT JSON
                 </a>
-                <OpenPreview bayId={bay.id} url={ev.previewUrl ?? ""} />
+                {ev.replayUrl ? (
+                  <a
+                    href={ev.replayUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="press bg-[#e3a008] px-4 py-2 text-[11px] tracking-widest text-[#121416]"
+                  >
+                    WATCH REPLAY
+                  </a>
+                ) : null}
               </div>
             ) : null}
           </div>
         </div>
+
+        {dryRun ? (
+          <div className="mt-6">
+            <DryRunNotice />
+          </div>
+        ) : null}
+
+        {bay.isSelf && measured ? (
+          <p className="mt-6 text-[11px] leading-5 text-[var(--mute)]">
+            Self-review: the Forklift inside this sandbox ran without a Solari key, so the recording shows its UI in
+            dry run. The live evidence for Forklift is the floor you just came from.
+          </p>
+        ) : null}
 
         {bay.error ? (
           <p className="mt-6 border border-[var(--bad)] p-4 text-sm text-[var(--bad)]">{bay.error}</p>
         ) : null}
 
         {!ev ? (
-          <p className="mt-10 text-sm text-[var(--mute)]">Still on the lift — this bay is {bay.status}.</p>
+          <p className="mt-10 text-sm text-[var(--mute)]">Still {bay.status}.</p>
         ) : (
           <div className="mt-8 grid gap-5">
-            <section className="bezel">
-              {bay.hasScreenshot ? (
-                <img
-                  src={`/api/bays/${bay.id}/screenshot`}
-                  alt={`${bay.repo.name} preview screenshot`}
-                  className="w-full"
-                />
-              ) : (
-                <p className="p-10 text-center text-sm text-[var(--mute)]">No screenshot captured.</p>
-              )}
-            </section>
+            <Artifact ev={ev} bayId={bay.id} hasScreenshot={bay.hasScreenshot} repoName={bay.repo.name} />
 
             <div className="grid gap-5 lg:grid-cols-2">
-              <Section title="Payload manifest">
+              <Section title="Run">
                 <dl>
                   {(
                     [
                       ["REPO", bay.repo.url, bay.repo.url],
-                      ["PREVIEW", ev.previewUrl, ev.previewUrl],
-                      ["STACK", ev.manifestUsed ? `${ev.stack} · via forklift.yaml` : ev.stack, undefined],
-                      ["BUILD", ev.build.ok ? "ok" : "failed", undefined],
-                      [
-                        "TESTS",
-                        ev.tests.ran ? (ev.tests.ok ? "ok" : "failed") : "none found",
-                        undefined,
-                      ],
-                      ["SECRETS", `${ev.secretsFound.length} found`, undefined],
+                      ["AHEAD", bay.repo.aheadBy != null ? `${bay.repo.aheadBy} commits` : null, undefined],
+                      ["MODE", measured ? (ev.kind ?? "server") + (ev.cwd ? ` · ${ev.cwd}` : "") : nm, undefined],
+                      ["PREVIEW", measured ? (ev.previewUrl ? `${ev.previewUrl} (sandbox closed)` : "none") : nm, undefined],
+                      ["STACK", measured ? (ev.manifestUsed ? `${ev.stack} · forklift.yaml` : ev.stack) : nm, undefined],
+                      ["BUILD", measured ? (ev.build.ok ? "ok" : "failed") : nm, undefined],
+                      ["TESTS", measured ? (ev.tests.ran ? (ev.tests.ok ? "ok" : "failed") : "none") : nm, undefined],
+                      ["SECRETS", measured ? (ev.secretsFound.length ? String(ev.secretsFound.length) : "none") : nm, undefined],
                     ] as Array<[string, string | null | undefined, string | null | undefined]>
-                  ).map(([k, v, href]) => (
+                  )
+                    .filter(([, v]) => v !== null && v !== undefined)
+                    .map(([k, v, href]) => (
                     <div key={k} className="mrow">
                       <dt>{k}</dt>
                       <span className="dots" />
@@ -147,15 +234,14 @@ export default async function CardPage({ params }: { params: Promise<{ bayId: st
                 </dl>
                 {ev.replayUrl ? (
                   <p className="mt-4 border-t border-[var(--line-soft)] pt-4 text-[11px] text-[var(--mute)]">
-                    REPLAY ·{" "}
                     <a href={ev.replayUrl} className="text-[var(--amber)]">
-                      watch the recorded browser walkthrough
+                      Watch recording →
                     </a>
                   </p>
                 ) : null}
               </Section>
 
-              <Section title="Inspection results">
+              <Section title="Criteria">
                 <ul>
                   {ev.criteria.map((c) => (
                     <Criterion key={c.label} c={c} />
@@ -165,13 +251,17 @@ export default async function CardPage({ params }: { params: Promise<{ bayId: st
             </div>
 
             <div className="grid gap-5 lg:grid-cols-2">
-              <Section title="Solari integration">
-                <div className="flex flex-wrap gap-2">
-                  <Flag label="SANDBOX" on={ev.solari.sandbox} />
-                  <Flag label="BROWSER" on={ev.solari.browser} />
-                  <Flag label="RECORDING" on={ev.solari.recording} />
-                  <Flag label="DESKTOP" on={ev.solari.desktop} />
-                </div>
+              <Section title="Solari">
+                {measured || bay.isSelf ? (
+                  <div className="flex flex-wrap gap-2">
+                    <Flag label="SANDBOX" on={ev.solari.sandbox} />
+                    <Flag label="BROWSER" on={ev.solari.browser} />
+                    <Flag label="RECORDING" on={ev.solari.recording} />
+                    <Flag label="DESKTOP" on={ev.solari.desktop} />
+                  </div>
+                ) : (
+                  <p className="text-sm text-[var(--mute)]">Source not scanned in a dry run.</p>
+                )}
                 {ev.solari.packages.length > 0 ? (
                   <p className="mt-3 text-[11px] text-[var(--mute)]">
                     packages: {ev.solari.packages.join(", ")}
@@ -182,52 +272,64 @@ export default async function CardPage({ params }: { params: Promise<{ bayId: st
                 ) : null}
               </Section>
 
-              <Section title="README check">
+              <Section title="README">
+                {!measured && !bay.isSelf ? (
+                  <p className="text-sm text-[var(--mute)]">Not read in a dry run.</p>
+                ) : (
                 <dl>
                   <div className="mrow">
-                    <dt>CLAIMED START</dt>
+                    <dt>START</dt>
                     <span className="dots" />
                     <dd>{ev.readme.claimedStart ?? "none"}</dd>
                   </div>
                   <div className="mrow">
-                    <dt>START WORKS</dt>
+                    <dt>FOUND</dt>
                     <span className="dots" />
                     <dd>{ev.readme.startExists ? "yes" : "no"}</dd>
                   </div>
                   <div className="mrow">
-                    <dt>CLAIMED PORT</dt>
+                    <dt>PORT</dt>
                     <span className="dots" />
                     <dd>{ev.readme.claimedPort ?? "none"}</dd>
                   </div>
                   <div className="mrow">
-                    <dt>PORT MATCHED</dt>
+                    <dt>MATCHES</dt>
                     <span className="dots" />
                     <dd>{ev.readme.portMatched ? "yes" : "no"}</dd>
                   </div>
                   <div className="mrow">
-                    <dt>MENTIONS SOLARI</dt>
+                    <dt>NAMES SOLARI</dt>
                     <span className="dots" />
                     <dd>{ev.readme.mentionsSolari ? "yes" : "no"}</dd>
                   </div>
                 </dl>
+                )}
               </Section>
             </div>
 
-            <div className="grid gap-5 lg:grid-cols-2">
-              <Section title={`Console errors · ${ev.consoleErrors.length}`}>
-                <pre className="term max-h-64 p-3">
-                  {ev.consoleErrors.slice(0, 40).join("\n") || "clean"}
-                </pre>
-              </Section>
-              <Section title={`Network errors · ${ev.networkErrors.length}`}>
-                <pre className="term max-h-64 p-3">
-                  {ev.networkErrors.slice(0, 40).join("\n") || "clean"}
-                </pre>
-              </Section>
-            </div>
+            {measured && ev.kind !== "script" ? (
+              <div className="grid gap-5 lg:grid-cols-2">
+                <Section title={`Console · ${ev.consoleErrors.length}`}>
+                  <pre className="term max-h-64 p-3">
+                    {ev.consoleErrors.slice(0, 40).join("\n") || (ev.previewUrl ? "clean" : "no browser pass")}
+                  </pre>
+                </Section>
+                <Section title={`Network · ${ev.networkErrors.length}`}>
+                  <pre className="term max-h-64 p-3">
+                    {ev.networkErrors.slice(0, 40).join("\n") || (ev.previewUrl ? "clean" : "no browser pass")}
+                  </pre>
+                </Section>
+              </div>
+            ) : null}
 
-            <Section title="Meaningful changes vs upstream">
-              {ev.diff.files.length > 0 ? (
+            <Section title="Diff">
+              {!measured && ev.diff.filesChanged > 0 ? (
+                <p className="text-sm text-[var(--mute)]">
+                  GitHub compare: {ev.diff.filesChanged} files changed
+                  {bay.repo.aheadBy != null ? `, ${bay.repo.aheadBy} commits ahead of upstream` : ""}. Contents not
+                  fetched in a dry run.
+                </p>
+              ) : ev.diff.files.length > 0 ? (
                 <div className="text-sm">
                   <p className="mb-3 text-[var(--mute)]">
                     <span style={{ color: "var(--ok)" }}>+{ev.diff.insertions}</span>{" "}
@@ -254,11 +356,11 @@ export default async function CardPage({ params }: { params: Promise<{ bayId: st
                   </ul>
                 </div>
               ) : (
-                <p className="text-sm text-[var(--mute)]">No diff recorded.</p>
+                <p className="text-sm text-[var(--mute)]">{measured ? "No diff against upstream." : "Not measured."}</p>
               )}
             </Section>
 
-            <Section title="Bay log">
+            <Section title="Log">
               <pre className="term max-h-72 p-3">{bay.logs.join("\n") || "quiet"}</pre>
             </Section>
           </div>

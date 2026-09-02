@@ -5,9 +5,23 @@ import { listForks, pickReviewSet } from "@/lib/github/forks";
 import { parseGithubRepo, sameRepo } from "@/lib/github/parse";
 import { newId } from "@/lib/ids";
 import { log } from "@/lib/log";
-import { hasSolariKey, killAllSandboxes } from "@/lib/solari/clients";
+import { hasSolariKey, killAllSandboxes, reclaimSandboxes } from "@/lib/solari/clients";
 import { getStore } from "@/lib/store";
 import type { Bay, CreateJobInput, ForkHit, Job } from "@/lib/types";
+
+async function mapPool<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  const width = Math.max(1, Math.min(limit, items.length || 1));
+  let cursor = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const idx = cursor;
+      cursor += 1;
+      const item = items[idx];
+      if (item !== undefined) await fn(item);
+    }
+  }
+  await Promise.all(Array.from({ length: width }, () => worker()));
+}
 
 const globalEngine = globalThis as unknown as {
   forkliftEngine?: { started: boolean; shuttingDown: boolean };
@@ -94,7 +108,11 @@ async function runJob(jobId: string, input: CreateJobInput) {
                 cloneUrl: "local://",
               }
             : null
-          : parseGithubRepo(input.selfRepo);
+          : (() => {
+              // GitHub URL is a label; bay 05 always packs this deployed tree
+              const parsed = parseGithubRepo(input.selfRepo);
+              return { ...parsed, cloneUrl: "local://" };
+            })();
     let forks: ForkHit[] = [];
     if (input.kind === "contest") {
       forks = await listForks(upstream);
@@ -124,9 +142,13 @@ async function runJob(jobId: string, input: CreateJobInput) {
         url: fork.url,
         defaultBranch: fork.defaultBranch,
         cloneUrl: fork.cloneUrl,
+        // GitHub compare numbers ride along so a dry run can show something true
+        aheadBy: fork.aheadBy,
+        changedFiles: fork.changedFiles,
       },
       isSelf: Boolean(selfRepo && sameRepo(fork, selfRepo)),
       status: "queued",
+      mode: null,
       logs: [],
       evidence: null,
       hasScreenshot: false,
@@ -151,14 +173,38 @@ async function runJob(jobId: string, input: CreateJobInput) {
     if (job) hub.publish(jobId, { type: "job", job });
 
     const live = hasSolariKey();
-    await Promise.all(
-      bays.map(async (bay) => {
+    if (live) {
+      // drop our own orphans from earlier failed floors before we stampede create()
+      await reclaimSandboxes("job-start");
+    }
+
+    // Solari accounts are often concurrency-capped below 5; override with FORKLIFT_BAY_CONCURRENCY
+    const pool = live
+      ? Math.max(1, Number(process.env.FORKLIFT_BAY_CONCURRENCY || 2) || 2)
+      : bays.length;
+
+    await mapPool(bays, pool, async (bay) => {
+      try {
         if (live) await reviewBay({ bay, upstream, criteria: input.criteria });
         else await fixtureBay({ bay, criteria: input.criteria });
-      }),
-    );
+      } catch (err) {
+        // reviewBay / fixtureBay already stamp the bay; this is a last-resort net
+        const message = err instanceof Error ? err.message : String(err);
+        log("bay.unhandled", { bayId: bay.id, err: message });
+        if (bay.status !== "done" && bay.status !== "failed") {
+          bay.status = "failed";
+          bay.error = message;
+          await store.upsertBay(bay);
+          hub.publish(jobId, { type: "bay", bay: { ...bay } });
+        }
+      }
+    });
 
-    job = await store.updateJob(jobId, { status: "done" });
+    const allFailed = bays.length > 0 && bays.every((bay) => bay.status === "failed");
+    job = await store.updateJob(
+      jobId,
+      allFailed ? { status: "failed", error: "Every bay failed. Open a door for the reason." } : { status: "done" },
+    );
     if (job) hub.publish(jobId, { type: "job", job });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

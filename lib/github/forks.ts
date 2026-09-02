@@ -88,7 +88,8 @@ export async function pickReviewSet(input: {
       aheadBy: null,
       changedFiles: null,
     };
-    return [hit];
+    // one GitHub call so even a dry run can say how far ahead this fork is
+    return [await compareFork(input.upstream, hit)];
   }
 
   const candidates = input.forks.filter((fork) => !looksEmpty(fork));
