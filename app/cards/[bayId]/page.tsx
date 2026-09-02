@@ -167,14 +167,12 @@ export default async function CardPage({ params }: { params: Promise<{ bayId: st
                   EXPORT JSON
                 </a>
                 {ev.browserSessionId || ev.replayUrl ? (
-                  <a
-                    href={`/api/bays/${bay.id}/replay`}
-                    target="_blank"
-                    rel="noreferrer"
+                  <Link
+                    href={`/replay/${bay.id}`}
                     className="press bg-[#e3a008] px-4 py-2 text-[11px] tracking-widest text-[#121416]"
                   >
                     WATCH REPLAY
-                  </a>
+                  </Link>
                 ) : null}
               </div>
             ) : null}
@@ -248,9 +246,9 @@ export default async function CardPage({ params }: { params: Promise<{ bayId: st
                 </dl>
                 {ev.browserSessionId || ev.replayUrl ? (
                   <p className="mt-4 border-t border-[var(--line-soft)] pt-4 text-[11px] text-[var(--mute)]">
-                    <a href={`/api/bays/${bay.id}/replay`} className="text-[var(--amber)]">
+                    <Link href={`/replay/${bay.id}`} className="text-[var(--amber)]">
                       Watch recording →
-                    </a>
+                    </Link>
                     {ev.browserSessionId ? <span className="ml-2 opacity-70">session {ev.browserSessionId.slice(-12)}</span> : null}
                   </p>
                 ) : null}

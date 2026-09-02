@@ -344,6 +344,24 @@ body::after {
   padding: 12px;
 }
 
+/* rrweb-player ships a white light theme; sit it on the bezel without fighting its layout */
+.replay-host .rr-player {
+  margin: 0 auto;
+  background: #0b0d0f;
+  box-shadow: none;
+}
+.replay-host .rr-controller {
+  background: #121416;
+  color: var(--fog);
+}
+.replay-host .rr-controller__btns button {
+  color: var(--fog);
+}
+.replay-host .rr-controller__btns button.active {
+  background: var(--amber);
+  color: #121416;
+}
+
 /* dry-run band: hazard-striped edge so nobody mistakes an unmeasured card for evidence */
 .notice {
   position: relative;
