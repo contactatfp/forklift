@@ -10,6 +10,12 @@ export type DetectedStack = {
   start: string | null;
   test: string | null;
   port: number;
+  /**
+   * Hand the app PORT=<port> on start? False when the port is a framework default
+   * we merely expect (Vite's 5173): forcing it onto a sibling API server made the
+   * two collide on the same socket in a live run.
+   */
+  portEnv: boolean;
   health: string;
   manifest: ForkliftManifest | null;
 };
@@ -150,6 +156,7 @@ export function detectStack(files: Record<string, string>, opts?: { cwd?: string
   let start: string | null = manifest?.start ?? null;
   let test: string | null = manifest?.tests ?? null;
   let port = manifest?.port ?? 3000;
+  let portEnv = true;
   const health = manifest?.health ?? "/";
   let kind: RunKind = manifest?.kind ?? "server";
   let serverish = Boolean(manifest?.port) || Boolean(manifest?.health);
@@ -173,8 +180,10 @@ export function detectStack(files: Record<string, string>, opts?: { cwd?: string
     // CI=1 in the env keeps jest/vitest out of watch mode; extra args would break node --test
     if (!test && scripts.test) test = "npm test";
     if (!manifest?.port) {
-      if (deps?.vite && !deps?.next) port = 5173;
-      else port = 3000;
+      if (deps?.vite && !deps?.next) {
+        port = 5173;
+        portEnv = false;
+      } else port = 3000;
     }
     const isNext = Boolean(files["next.config.ts"] || files["next.config.js"] || files["next.config.mjs"]);
     if (isNext && scripts.build && scripts.start) {
@@ -235,6 +244,7 @@ export function detectStack(files: Record<string, string>, opts?: { cwd?: string
     start,
     test,
     port,
+    portEnv,
     health,
     manifest,
   };

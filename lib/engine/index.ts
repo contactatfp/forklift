@@ -1,6 +1,7 @@
 import { fixtureBay } from "@/lib/engine/fixture";
 import { getHub } from "@/lib/engine/events";
 import { reviewBay } from "@/lib/engine/pipeline";
+import { slotLimit, withSlot } from "@/lib/engine/slots";
 import { listForks, pickReviewSet } from "@/lib/github/forks";
 import { parseGithubRepo, sameRepo } from "@/lib/github/parse";
 import { newId } from "@/lib/ids";
@@ -178,15 +179,21 @@ async function runJob(jobId: string, input: CreateJobInput) {
       await reclaimSandboxes("job-start");
     }
 
-    // Solari accounts are often concurrency-capped below 5; override with FORKLIFT_BAY_CONCURRENCY
-    const pool = live
-      ? Math.max(1, Number(process.env.FORKLIFT_BAY_CONCURRENCY || 2) || 2)
-      : bays.length;
+    // per-floor width; the process-wide gate in slots.ts is what actually respects the org cap
+    const pool = live ? slotLimit() : bays.length;
 
     await mapPool(bays, pool, async (bay) => {
       try {
-        if (live) await reviewBay({ bay, upstream, criteria: input.criteria });
-        else await fixtureBay({ bay, criteria: input.criteria });
+        if (live) {
+          await withSlot(
+            (ahead) => {
+              bay.logs.push(`waiting for a sandbox slot · ${ahead} bay${ahead === 1 ? "" : "s"} ahead`);
+              void store.upsertBay(bay);
+              hub.publish(jobId, { type: "log", jobId, bayId: bay.id, line: bay.logs[bay.logs.length - 1]! });
+            },
+            () => reviewBay({ bay, upstream, criteria: input.criteria }),
+          );
+        } else await fixtureBay({ bay, criteria: input.criteria });
       } catch (err) {
         // reviewBay / fixtureBay already stamp the bay; this is a last-resort net
         const message = err instanceof Error ? err.message : String(err);

@@ -87,23 +87,44 @@ export async function reclaimSandboxes(reason: string): Promise<number> {
 
 function isConcurrencyError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
-  return /concurrent|capacity|NoCapacity|Too many/i.test(msg);
+  const code = (err as { code?: unknown } | null)?.code;
+  return code === "ConcurrencyLimitExceeded" || /concurrent|capacity|NoCapacity|Too many/i.test(msg);
 }
+
+/** The gateway's 429 body carries plan + cap; surface them so the log says what the org can run. */
+function describeCap(err: unknown): string {
+  const e = err as { cap?: unknown; plan?: unknown; body?: { cap?: unknown; plan?: unknown } } | null;
+  const cap = e?.cap ?? e?.body?.cap;
+  const plan = e?.plan ?? e?.body?.plan;
+  if (cap === undefined && plan === undefined) return "";
+  return ` (org cap ${String(cap ?? "?")}${plan ? `, plan ${String(plan)}` : ""})`;
+}
+
+/** How long a bay will sit waiting on the org's concurrency cap before it gives up. */
+const SLOT_WAIT_MS = Math.max(30_000, Number(process.env.FORKLIFT_SLOT_WAIT_MS || 6 * 60_000) || 6 * 60_000);
+const SLOT_POLL_MS = 10_000;
 
 /**
  * Open a bay sandbox from the golden `base` template.
- * Warm snapshots are opt-in — Solari often 409s "Not snapshottable" and the
- * warm-up box itself burns a concurrency slot the five bays need.
+ * On the org's concurrency cap we wait, polling every 10s for up to
+ * SLOT_WAIT_MS — a bay ahead of us takes ~4 minutes and the 429 is deterministic
+ * until it closes. Warm snapshots are opt-in — Solari often 409s "Not
+ * snapshottable" and the warm-up box itself burns a slot.
  */
-export async function createReviewSandbox(owner: SandboxOwner): Promise<Sandbox> {
+export async function createReviewSandbox(
+  owner: SandboxOwner,
+  onWait?: (line: string) => void,
+): Promise<Sandbox> {
   const client = sandboxClient();
-  const delays = [0, 2_000, 4_000, 8_000, 12_000];
   const metadata = { ...TAG, jobId: owner.jobId, bayId: owner.bayId };
+  const started = Date.now();
   let lastErr: unknown;
 
-  for (let attempt = 0; attempt < delays.length; attempt++) {
-    const delay = delays[attempt] ?? 0;
-    if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+  for (let attempt = 0; ; attempt++) {
+    if (attempt > 0) {
+      if (Date.now() - started > SLOT_WAIT_MS) break;
+      await new Promise((r) => setTimeout(r, SLOT_POLL_MS));
+    }
     try {
       if (process.env.FORKLIFT_WARM_SNAPSHOT === "1" && attempt === 0) {
         const snapId = await workerSnapshot();
@@ -124,11 +145,21 @@ export async function createReviewSandbox(owner: SandboxOwner): Promise<Sandbox>
       lastErr = err;
       if (!isConcurrencyError(err)) throw err;
       log("sandbox.create.retry", { attempt, err: String(err) });
-      if (attempt === 0) await reclaimSandboxes("concurrency");
+      if (attempt === 0) {
+        const killed = await reclaimSandboxes("concurrency");
+        onWait?.(
+          `Solari says the org is at its concurrent-session cap${describeCap(err)}` +
+            (killed ? ` · reclaimed ${killed} orphan${killed === 1 ? "" : "s"}` : "") +
+            ` · waiting up to ${Math.round(SLOT_WAIT_MS / 60_000)} min for a slot`,
+        );
+      } else if (attempt % 6 === 0) {
+        onWait?.(`still waiting for a sandbox slot · ${Math.round((Date.now() - started) / 1000)}s`);
+      }
     }
   }
 
-  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+  const base = lastErr instanceof Error ? lastErr.message : String(lastErr);
+  throw new Error(`${base}${describeCap(lastErr)} — no sandbox slot freed up in ${Math.round(SLOT_WAIT_MS / 60_000)} min`);
 }
 
 const globalSnap = globalThis as unknown as {

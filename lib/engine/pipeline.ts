@@ -351,7 +351,9 @@ export async function reviewBay(input: {
   };
 
   try {
-    sbx = await createReviewSandbox({ jobId: input.bay.jobId, bayId: input.bay.id });
+    sbx = await createReviewSandbox({ jobId: input.bay.jobId, bayId: input.bay.id }, (line) =>
+      void logBay(input.bay, line),
+    );
     trackSandbox(sbx);
     input.bay.sandboxId = sbx.id;
     await store.upsertBay(input.bay);
@@ -602,11 +604,8 @@ export async function reviewBay(input: {
     } else {
       await setStatus(input.bay, "preview");
       await logBay(input.bay, stack.start);
-      const env: Record<string, string> = {
-        ...guestEnv,
-        PORT: String(stack.port),
-        HOST: "0.0.0.0",
-      };
+      const env: Record<string, string> = { ...guestEnv, HOST: "0.0.0.0" };
+      if (stack.portEnv) env.PORT = String(stack.port);
       // stream the server's own output into the log so a crash on boot is visible on the card
       await sbx.commands.start("sh", {
         args: ["-c", stack.start],
