@@ -52,7 +52,7 @@ export default function VerifyPage() {
           "Content-Type": "application/json",
           ...(accessKey ? { "x-forklift-key": accessKey } : {}),
         },
-        body: JSON.stringify({ kind: "verify", upstream, verifyUrl: repo.trim(), accessKey }),
+        body: JSON.stringify({ kind: "verify", upstream, verifyUrl: repo.trim() }),
       });
       if (!res.ok) throw new Error(await readError(res));
       const body: unknown = await res.json();

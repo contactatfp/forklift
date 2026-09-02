@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 
 export function accessKeyConfigured(): boolean {
@@ -12,13 +13,20 @@ export function writesLocked(): boolean {
   return process.env.NODE_ENV === "production" && !accessKeyConfigured();
 }
 
-export function accessKeyOk(request: Request, bodyKey?: unknown): boolean {
+function secretEqual(given: string, expected: string): boolean {
+  const left = Buffer.from(given);
+  const right = Buffer.from(expected);
+  if (left.length !== right.length) return false;
+  return timingSafeEqual(left, right);
+}
+
+/** Header only. A key in the JSON body is ignored. */
+export function accessKeyOk(request: Request): boolean {
   if (writesLocked()) return false;
   const expected = process.env.FORKLIFT_ACCESS_KEY;
   if (!expected) return true;
-  const header = request.headers.get("x-forklift-key");
-  const fromBody = typeof bodyKey === "string" ? bodyKey : "";
-  return header === expected || fromBody === expected;
+  const header = request.headers.get("x-forklift-key") ?? "";
+  return secretEqual(header, expected);
 }
 
 export function deny(): NextResponse {

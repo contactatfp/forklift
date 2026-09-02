@@ -1,6 +1,7 @@
 import { gunzipSync } from "node:zlib";
 import { startEngine } from "@/lib/engine";
 import { browserClient, hasSolariKey } from "@/lib/solari/clients";
+import { REPLAY_LIMIT, REPLAY_WINDOW_MS, takeToken } from "@/lib/rate-limit";
 import { getStore } from "@/lib/store";
 import { log } from "@/lib/log";
 
@@ -10,7 +11,14 @@ export const dynamic = "force-dynamic";
  * The replay Solari publishes is a gzipped NDJSON of rrweb events, which a
  * browser cannot open. Pull it server-side and hand the player a JSON array.
  */
-export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+  const retry = takeToken(request, "replay", REPLAY_LIMIT, REPLAY_WINDOW_MS);
+  if (retry !== null) {
+    return Response.json(
+      { error: "Too many requests" },
+      { status: 429, headers: { "Retry-After": String(retry) } },
+    );
+  }
   startEngine();
   const { id } = await context.params;
   const store = await getStore();

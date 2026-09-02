@@ -2,6 +2,7 @@ import { accessKeyOk, deny } from "@/lib/access";
 import { enqueueJob, startEngine } from "@/lib/engine";
 import { parseCriteria } from "@/lib/github/parse";
 import { log } from "@/lib/log";
+import { JOB_LIMIT, JOB_WINDOW_MS, takeToken } from "@/lib/rate-limit";
 import { getStore } from "@/lib/store";
 import { NextResponse } from "next/server";
 
@@ -49,7 +50,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Expected JSON body" }, { status: 400 });
   }
   const rec = body as Record<string, unknown>;
-  if (!accessKeyOk(request, rec.accessKey)) return deny();
+  if (!accessKeyOk(request)) return deny();
+  const retry = takeToken(request, "jobs", JOB_LIMIT, JOB_WINDOW_MS);
+  if (retry !== null) {
+    return NextResponse.json(
+      { error: "Too many requests" },
+      { status: 429, headers: { "Retry-After": String(retry) } },
+    );
+  }
 
   const kind = rec.kind === "verify" ? "verify" : "contest";
   const upstream =

@@ -11,7 +11,7 @@ import {
   type DetectedStack,
 } from "@/lib/detect/stack";
 import { recordPreview } from "@/lib/engine/browser";
-import { previewPath } from "@/lib/engine/preview";
+import { fetchPreview, previewPath } from "@/lib/engine/preview";
 import { getHub } from "@/lib/engine/events";
 import { isLocalRepo, packLocalTree } from "@/lib/engine/pack";
 import { log } from "@/lib/log";
@@ -33,16 +33,10 @@ function githubToken(): string | null {
   return process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null;
 }
 
-/** Creds for sandbox git over HTTPS — passed per call, never written to the remote URL. */
-function gitAuth(): { username?: string; password?: string } {
-  const token = githubToken();
-  if (!token) return {};
-  return { username: "x-access-token", password: token };
-}
-
 /**
- * Same creds for raw `git` invocations, as an extraheader in env. Nothing ends
- * up in `.git/config` and a failing fetch can't echo the token in its URL.
+ * Auth for sandbox git over HTTPS. Extraheader lives in this command's env
+ * only — never splice the token into a remote URL (git would save it in
+ * .git/config, and guest install/start could read it).
  */
 function gitEnv(): Record<string, string> {
   const token = githubToken();
@@ -54,6 +48,59 @@ function gitEnv(): Record<string, string> {
     GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${basic}`,
     GIT_TERMINAL_PROMPT: "0",
   };
+}
+
+async function gitClone(
+  sbx: Sandbox,
+  url: string,
+  dest: string,
+  budget: Budget,
+  branch?: string,
+): Promise<void> {
+  const args = ["clone", "--depth", "1"];
+  if (branch) args.push("--branch", branch);
+  args.push(url, dest);
+  const cloned = await sbx.commands.run("git", {
+    args,
+    env: gitEnv(),
+    timeoutMs: budget.cap(60_000),
+  });
+  if (cloned.exitCode !== 0) {
+    throw new Error(scrub(`git clone failed (${cloned.exitCode}): ${(cloned.stderr || cloned.stdout).slice(-400)}`));
+  }
+  await pinRemote(sbx, dest, "origin", url, budget);
+}
+
+async function pinRemote(
+  sbx: Sandbox,
+  cwd: string,
+  name: string,
+  url: string,
+  budget: Budget,
+): Promise<void> {
+  const pinned = await sbx.commands.run("git", {
+    args: ["remote", "set-url", name, url],
+    cwd,
+    timeoutMs: budget.cap(10_000),
+  });
+  if (pinned.exitCode !== 0) {
+    throw new Error(scrub(`git remote set-url ${name} failed (${pinned.exitCode})`));
+  }
+}
+
+/** Guest code runs next. If a remote still has the PAT, stop. */
+async function assertRemotesClean(sbx: Sandbox, cwd: string, budget: Budget): Promise<void> {
+  const listed = await sbx.commands.run("git", {
+    args: ["remote", "-v"],
+    cwd,
+    timeoutMs: budget.cap(10_000),
+  });
+  if (listed.exitCode !== 0) return;
+  const blob = `${listed.stdout}\n${listed.stderr}`;
+  const token = githubToken();
+  if (/x-access-token:/i.test(blob) || (token && blob.includes(token))) {
+    throw new Error("git remote still carries credentials; refusing to run guest code");
+  }
 }
 
 /** Belt and braces: if the token shows up in anything we log or stamp, blank it. */
@@ -310,7 +357,7 @@ async function waitForPreview(
   let lastStatus = 0;
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(previewPath(url, health || "/"), { redirect: "follow" });
+      const res = await fetchPreview(previewPath(url, health || "/"));
       // the gateway answers 502/503/504 while nothing is bound; anything else means the
       // app itself spoke, and a 404 on "/" from an API-only server is still a live server
       if (res.status < 500) {
@@ -497,16 +544,11 @@ async function runBay(input: BayInput): Promise<void> {
       if (unpacked.exitCode !== 0) throw new Error("failed to unpack local tree");
     } else {
       await logBay(input.bay, `clone ${input.bay.repo.cloneUrl}`);
-      const auth = gitAuth();
       try {
-        await sbx.git.clone(input.bay.repo.cloneUrl, {
-          path: WORK,
-          depth: 1,
-          branch: input.bay.repo.defaultBranch,
-          ...auth,
-        });
+        await gitClone(sbx, input.bay.repo.cloneUrl, WORK, budget, input.bay.repo.defaultBranch);
       } catch {
-        await sbx.git.clone(input.bay.repo.cloneUrl, { path: WORK, depth: 1, ...auth });
+        await sbx.commands.run("rm", { args: ["-rf", WORK], timeoutMs: budget.cap(15_000) });
+        await gitClone(sbx, input.bay.repo.cloneUrl, WORK, budget);
       }
     }
 
@@ -533,11 +575,8 @@ async function runBay(input: BayInput): Promise<void> {
     // diff first — for cookbook forks it tells us which example dir to review
     let diff: DiffEvidence = { filesChanged: 0, insertions: 0, deletions: 0, files: [], newTopLevel: [] };
     if (isLocal) {
-      await sbx.git.clone(input.upstream.cloneUrl, {
-        path: "/work/upstream",
-        depth: 1,
-        ...gitAuth(),
-      });
+      await gitClone(sbx, input.upstream.cloneUrl, "/work/upstream", budget);
+      await assertRemotesClean(sbx, "/work/upstream", budget);
       const listed = await sh(
         sbx,
         `diff -rq /work/upstream ${WORK} | grep -v node_modules | grep -v '.git' | head -80`,
@@ -558,6 +597,7 @@ async function runBay(input: BayInput): Promise<void> {
         env,
         timeoutMs: budget.cap(60_000),
       });
+      await assertRemotesClean(sbx, WORK, budget);
       if (fetchUp.exitCode === 0) {
         const stat = await sbx.commands.run("git", {
           args: ["diff", "--shortstat", "FETCH_HEAD"],

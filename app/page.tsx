@@ -72,7 +72,6 @@ function Requisition() {
           criteria,
           selfRepo: selfRepo.trim() || "local",
           verifyUrl: verifyUrl.trim() || undefined,
-          accessKey,
         }),
       });
       if (!res.ok) throw new Error(await readError(res));

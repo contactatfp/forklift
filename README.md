@@ -44,7 +44,7 @@ Two SDKs, used the way they are sold: sandboxes as disposable CI workers, browse
 **Sandboxes** ([`lib/solari/clients.ts`](lib/solari/clients.ts), [`lib/engine/pipeline.ts`](lib/engine/pipeline.ts))
 
 - `SandboxClient.create({ template: "base", cpu: 2, memMb: 4096, lifecycle: { onTimeout: "kill" }, metadata: { app: "forklift", jobId, bayId } })`. Every box is tagged so reclaim can never touch a sandbox Forklift did not open.
-- `sbx.git.clone(url, { depth: 1, branch, username, password })` for the fork; creds go per-call, nothing lands in `.git/config`. The upstream fetch for the diff runs as raw `git` with the token in a `GIT_CONFIG_*` extraheader, never in the remote URL.
+- `git clone` over HTTPS with the token in a `GIT_CONFIG_*` extraheader (never in the remote URL). After clone we `git remote set-url` to the tokenless URL and refuse to run guest code if `git remote -v` still shows credentials. The upstream fetch for the diff uses the same extraheader.
 - `sbx.files.write` / `readText` / `search` to drop the secret scanner in, read manifests, and find `@solarisdk` imports across the tree.
 - `sbx.commands.run("sh", { args: ["-c", …], cwd, env, timeoutMs, onStdout, onStderr })` for install, build, test, and script runs. Output streams to the floor as it happens.
 - `sbx.commands.start(...)` + `sbx.previewUrl(port)` for servers; Forklift polls the health path until it answers below 500 (an API-only 404 on `/` still counts as up).
@@ -126,7 +126,7 @@ After one real contest run, put its job id in `NEXT_PUBLIC_SHOWROOM_FLOOR` and t
 - **Guest code is hostile.** Everything from a fork runs inside the Solari sandbox. The host only ever `fetch`es the preview URL and drives a cloud browser at it.
 - **Our key never enters a guest.** Scripts that need `SOLARI_API_KEY` run without it and are marked, not failed. Bay 05 (Forklift reviewing itself) runs the nested app in dry-run mode for the same reason.
 - **Committed secrets fail the bay** before `npm install` runs ([`lib/detect/scan_secrets.py`](lib/detect/scan_secrets.py): Solari, GitHub, AWS, OpenAI key shapes, private keys).
-- **GitHub token** is passed per-call to `sbx.git` and as an extraheader env var to raw git; anything Forklift logs or stamps is scrubbed for it.
+- **GitHub token** is an extraheader on `git clone` / `git fetch` only; remotes are rewritten to tokenless HTTPS URLs before guest install. Anything Forklift logs or stamps is scrubbed for it.
 - **Writes fail closed in production.** `NODE_ENV=production` without `FORKLIFT_ACCESS_KEY` returns 503 on `POST /api/jobs` and logs why at boot. Read routes (floor, card, export) are public and UUID-scoped on purpose: the cards are the showroom.
 - **Reclaim is scoped.** Only sandboxes tagged `app=forklift` are ever killed, and never ones this process is using.
 
