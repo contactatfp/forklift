@@ -255,11 +255,13 @@ body::after {
 }
 
 .step span {
+  max-width: 100%;
   font-size: 8px;
   letter-spacing: 0.08em;
   color: var(--mute);
   white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .step.done .tick {
@@ -344,8 +346,28 @@ body::after {
   padding: 12px;
 }
 
+/* fullPage shots stay full width but don't shove the rest of the card off-screen */
+.shot-frame {
+  max-height: 28rem;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #2a3036 transparent;
+}
+
+.shot-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 /* rrweb-player ships a white light theme; sit it on the bezel without fighting its layout */
 /* its selectors are svelte-scoped (3 class hashes), so these need the extra weight */
+.replay-host {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
 .replay-host .rr-player {
   margin: 0 auto;
   float: none;

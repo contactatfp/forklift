@@ -6,7 +6,7 @@ Solari asked people to fork [solari-cookbook](https://github.com/solari-sdk/sola
 
 Paste the upstream repo and your judging criteria. Forklift finds every public fork, picks the ones that actually diverged, and for each one: opens a **Solari sandbox**, clones the fork, scans for committed secrets, installs, builds, then either serves it and sends a **recorded Solari browser** through it, or runs it to completion and keeps the transcript. Out comes an evidence card. Forklift does not rank anyone and never recommends a hire. It hands a human the facts.
 
-> **Live floor:** _add your Railway URL here_ · **90-second walkthrough:** _add video link here_
+> **Live floor:** [forklift-production-6ae6.up.railway.app](https://forklift-production-6ae6.up.railway.app/) · **90-second walkthrough:** _add video link here_
 >
 > Built with Cursor. The fork this ships in: _add fork URL here_.
 
@@ -47,7 +47,7 @@ Two SDKs, used the way they are sold: sandboxes as disposable CI workers, browse
 - `sbx.git.clone(url, { depth: 1, branch, username, password })` for the fork; creds go per-call, nothing lands in `.git/config`. The upstream fetch for the diff runs as raw `git` with the token in a `GIT_CONFIG_*` extraheader, never in the remote URL.
 - `sbx.files.write` / `readText` / `search` to drop the secret scanner in, read manifests, and find `@solarisdk` imports across the tree.
 - `sbx.commands.run("sh", { args: ["-c", …], cwd, env, timeoutMs, onStdout, onStderr })` for install, build, test, and script runs. Output streams to the floor as it happens.
-- `sbx.commands.start(...)` + `sbx.previewUrl(port)` for servers; Forklift polls the health path until it 200s.
+- `sbx.commands.start(...)` + `sbx.previewUrl(port)` for servers; Forklift polls the health path until it answers below 500 (an API-only 404 on `/` still counts as up).
 - `sbx.kill()` on both success and failure. Not `pause()`: a paused box still holds a concurrency slot the next bay needs.
 - `client.listAll({ metadata: { app: "forklift" } })` at job start to kill our own orphans from a crashed run.
 - Optional: `sbx.snapshot()` once to build a warm worker image (`FORKLIFT_WARM_SNAPSHOT=1`). Off by default, see gotchas.
@@ -145,7 +145,8 @@ Each of these is a comment next to the code that handles it.
 - **Do not force `PORT` on a framework that has its own default.** Handing `PORT=5173` to a Vite app made its sibling API server (`concurrently` server+web) grab 5173 first and Vite died with `EADDRINUSE`. `PORT` is only set when the port came from `forklift.yaml` or the generic 3000 default.
 - **Warm snapshots 409 "Not snapshottable" on the base template often enough that it is opt-in**, and the warm-up box itself eats a slot ([`clients.ts`](lib/solari/clients.ts)).
 - **`networkidle` never settles on dev servers with HMR/websockets.** The browser pass waits for `domcontentloaded` plus a short beat ([`browser.ts`](lib/engine/browser.ts)).
-- **Replays publish late, or not at all.** The docs say ~1–3s after `close()`; in production `getReplayUrl` 404'd `No replay available` for 45s on every real session, and the docs' own six-line snippet went from "replay in 6s" to "nothing after 120s" on the same key twenty minutes later. Forklift stores the browser **session id** and the card links `/api/bays/:id/replay`, which mints a fresh presigned URL on click (they expire in 15 minutes anyway) and says plainly when Solari has not published one.
+- **Replays publish late, or not at all.** The docs say ~1–3s after `close()`; in production `getReplayUrl` 404'd `No replay available` for 45s on every real session, and the docs' own six-line snippet went from "replay in 6s" to "nothing after 120s" on the same key twenty minutes later. Forklift stores the browser **session id** and the card links `/replay/:bayId`, which mints a fresh presigned URL on click via `/api/bays/:id/replay` (they expire in 15 minutes anyway) and says plainly when Solari has not published one.
+- **Bay status upserts can wipe the log if the in-memory bay is stale.** `upsertBay` writes whatever `logs` array the caller holds. Every `appendLog` refreshes `bay.logs` first, and status changes wait on the per-bay log queue ([`pipeline.ts`](lib/engine/pipeline.ts)), or the floor card shows four lines while the DB had hundreds.
 - **Do not release a browser session twice.** `browser.close()` already releases; a second DELETE 404s and can wipe the screenshot.
 - **Commands are not shell-interpreted.** Everything user-shaped goes through `sh -c` with the command in `args`.
 - **`timeoutMs` is a rolling idle window**, so the pipeline keeps its own wall-clock budget (5 min default, `timeoutMinutes` in `forklift.yaml` up to 8).

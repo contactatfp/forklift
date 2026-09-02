@@ -59,8 +59,14 @@ function Artifact({ ev, bayId, hasScreenshot, repoName }: { ev: Evidence; bayId:
   return (
     <section className="bezel">
       {hasScreenshot ? (
-        // eslint-disable-next-line @next/next/no-img-element -- PNG straight out of our own DB, no loader wanted
-        <img src={`/api/bays/${bayId}/screenshot`} alt={`${repoName} preview screenshot`} className="w-full" />
+        <>
+          {/* fullPage PNGs can be tall; keep the card usable, scroll for the rest */}
+          <div className="shot-frame">
+            {/* eslint-disable-next-line @next/next/no-img-element -- PNG straight out of our own DB, no loader wanted */}
+            <img src={`/api/bays/${bayId}/screenshot`} alt={`${repoName} preview screenshot`} className="w-full" />
+          </div>
+          <p className="px-1 pt-2 text-[10px] tracking-[0.18em] text-[var(--mute)]">FULL PAGE · SCROLL INSIDE THE FRAME</p>
+        </>
       ) : (
         <p className="p-10 text-center text-sm text-[var(--mute)]">
           {!ev.previewUrl
@@ -154,7 +160,10 @@ export default async function CardPage({ params }: { params: Promise<{ bayId: st
                   DRY RUN
                 </span>
               ) : null}
-              <span className="stamp text-[10px]" style={{ color: "var(--mute)", transform: "rotate(2deg)" }}>
+              <span
+                className="stamp max-w-full text-center text-[10px] leading-snug"
+                style={{ color: "var(--mute)", transform: "rotate(2deg)" }}
+              >
                 Evidence only · not a verdict
               </span>
             </div>
