@@ -160,6 +160,17 @@ async function readGuestFiles(sbx: Sandbox, dir: string, opts?: { search?: boole
     }),
   );
 
+  // python packages announce their entry point by file name, not content
+  try {
+    const mains = await sbx.commands.run("sh", {
+      args: ["-c", `cd ${JSON.stringify(dir)} && ls -d */__main__.py 2>/dev/null | head -5`],
+      timeoutMs: 5_000,
+    });
+    for (const rel of mains.stdout.split("\n").map((s) => s.trim()).filter(Boolean)) files[rel] ??= "";
+  } catch {
+    /* cosmetic */
+  }
+
   if (opts?.search === false) return files;
 
   for (const query of ["@solarisdk", "solarisdk", "recording: true"]) {

@@ -25,6 +25,18 @@ describe("detectStack", () => {
     expect(yarn.install).toMatch(/yarn install/);
   });
 
+  it("runs a packaged python CLI via its console script or python -m", () => {
+    const viaScript = detectStack({
+      "pyproject.toml": '[project]\nname = "cubicle"\n\n[project.scripts]\ncubicle = "cubicle.cli:main"\n\n[tool.x]\ny = 1\n',
+      "cubicle/__main__.py": "",
+    });
+    expect(viaScript.install).toBe("pip3 install .");
+    expect(viaScript.start).toBe("cubicle");
+    expect(viaScript.kind).toBe("script");
+    const viaMain = detectStack({ "requirements.txt": "httpx\n", "cubicle/__main__.py": "" });
+    expect(viaMain.start).toBe("python3 -m cubicle");
+  });
+
   it("picks the Node major the guest asks for, else current LTS", () => {
     expect(desiredNodeMajor({})).toBe(22);
     expect(desiredNodeMajor({ ".nvmrc": "20.11.0\n" })).toBe(20);

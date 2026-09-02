@@ -229,6 +229,13 @@ export function detectStack(files: Record<string, string>, opts?: { cwd?: string
         start = "python3 main.py";
       } else if (files["app.py"]) {
         start = "python3 app.py";
+      } else {
+        // a packaged CLI: pyproject [project.scripts] after `pip install .`, or `python -m pkg`
+        // when the package ships __main__.py. A live fork with 95 files under cubicle/ hit this.
+        const console = pyprojectScript(files["pyproject.toml"] ?? "");
+        const pkgMain = Object.keys(files).find((k) => /^[^/]+\/__main__\.py$/.test(k));
+        if (console && files["pyproject.toml"]) start = console;
+        else if (pkgMain) start = `python3 -m ${pkgMain.split("/")[0]}`;
       }
     }
     if (!test) {
@@ -318,6 +325,14 @@ export function changedProjectDirs(files: Array<{ path: string; status: string }
   // if fleet/ and fleet/apps/web both have manifests keep the shallower one; it owns the other
   const shallow = roots.filter((dir) => !roots.some((other) => other !== dir && dir.startsWith(`${other}/`)));
   return shallow.sort((a, b) => count(b) - count(a) || a.localeCompare(b));
+}
+
+/** First entry of pyproject's `[project.scripts]`, or null. Good enough without a TOML parser. */
+export function pyprojectScript(toml: string): string | null {
+  const section = /\[project\.scripts\]\s*\n([\s\S]*?)(?=\n\[|$)/.exec(toml)?.[1];
+  if (!section) return null;
+  const m = /^\s*"?([A-Za-z0-9_.-]+)"?\s*=\s*"/m.exec(section);
+  return m?.[1] ?? null;
 }
 
 function jsonParse(text: string): unknown {
