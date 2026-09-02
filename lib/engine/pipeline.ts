@@ -401,11 +401,57 @@ async function ensureNode(
   return { PATH: `/opt/node/bin:${pathRes.stdout.trim() || "/usr/local/bin:/usr/bin:/bin"}` };
 }
 
-export async function reviewBay(input: {
-  bay: Bay;
-  upstream: GithubRepo;
-  criteria: string[];
-}): Promise<void> {
+type BayInput = { bay: Bay; upstream: GithubRepo; criteria: string[] };
+
+/**
+ * Seen live: one pool host closed every sandbox's control websocket (code 1005)
+ * 5–10s after boot for a ~20 minute stretch, while the same steps on another
+ * host ran for minutes. A fresh create() usually lands elsewhere, so one retry
+ * turns "Control channel closed" from a verdict into a note.
+ */
+const CHANNEL_DROP_RETRIES = 1;
+
+function isChannelDrop(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return (err as { name?: string } | null)?.name === "ConnectionError" || /Control channel closed/i.test(msg);
+}
+
+export async function reviewBay(input: BayInput): Promise<void> {
+  const store = await getStore();
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await runBay(input);
+      return;
+    } catch (err) {
+      const message = scrub(err instanceof Error ? err.message : String(err));
+      if (attempt < CHANNEL_DROP_RETRIES && isChannelDrop(err)) {
+        log("bay.retry", { bay: input.bay.id, attempt, err: message });
+        await logBay(
+          input.bay,
+          `sandbox host dropped the control channel (${message}) · opening a fresh sandbox, retry ${attempt + 1}/${CHANNEL_DROP_RETRIES}`,
+        );
+        continue;
+      }
+      log("bay.fail", { bay: input.bay.id, err: message });
+      try {
+        await logBay(input.bay, `FAIL ${message}`);
+      } catch {
+        /* store may be down */
+      }
+      input.bay.status = "failed";
+      input.bay.error = message;
+      try {
+        await store.upsertBay(input.bay);
+        getHub().publish(input.bay.jobId, { type: "bay", bay: { ...input.bay } });
+      } catch {
+        /* best effort */
+      }
+      return;
+    }
+  }
+}
+
+async function runBay(input: BayInput): Promise<void> {
   const startedAt = Date.now();
   const budget = new Budget(startedAt + DEFAULT_BUDGET_MS);
   const store = await getStore();
@@ -769,35 +815,13 @@ export async function reviewBay(input: {
     input.bay.error = null;
     getHub().publish(input.bay.jobId, { type: "bay", bay: { ...input.bay } });
     await logBay(input.bay, "bay closed");
-
+  } finally {
     // kill (not pause) so the concurrency slot frees for the next bay in the pool
-    try {
-      await sbx.kill();
-    } catch (err) {
-      log("sandbox.kill.fail", { err: String(err) });
-    }
-    untrackSandbox(sbx);
-  } catch (err) {
-    const message = scrub(err instanceof Error ? err.message : String(err));
-    log("bay.fail", { bay: input.bay.id, err: message });
-    try {
-      await logBay(input.bay, `FAIL ${message}`);
-    } catch {
-      /* store may be down */
-    }
-    input.bay.status = "failed";
-    input.bay.error = message;
-    try {
-      await store.upsertBay(input.bay);
-      getHub().publish(input.bay.jobId, { type: "bay", bay: { ...input.bay } });
-    } catch {
-      /* best effort */
-    }
     if (sbx) {
       try {
         await sbx.kill();
-      } catch {
-        /* gone */
+      } catch (err) {
+        log("sandbox.kill.fail", { err: String(err) });
       }
       untrackSandbox(sbx);
     }

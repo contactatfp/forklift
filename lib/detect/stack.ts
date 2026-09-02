@@ -285,9 +285,35 @@ export function changedExampleDirs(files: Array<{ path: string; status: string }
     const score = f.status.startsWith("A") ? 2 : 1;
     seen.set(dir, Math.max(seen.get(dir) ?? 0, score));
   }
-  return [...seen.entries()]
+  const examples = [...seen.entries()]
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .map(([dir]) => dir);
+  return [...examples, ...changedProjectDirs(files).filter((d) => !examples.includes(d))];
+}
+
+const PROJECT_MANIFESTS = new Set(["package.json", "requirements.txt", "pyproject.toml", "forklift.yaml", "forklift.yml"]);
+
+/**
+ * Not every fork lives in examples/: one live floor had 147 changed files under
+ * `fleet/` and Forklift shrugged "nothing to run". Any directory whose own
+ * manifest is in the diff is a project; the one with the most changed files
+ * underneath goes first. Root manifests and workspace `packages/*` are skipped —
+ * the root is tried separately and a sub-package is rarely the runnable thing.
+ */
+export function changedProjectDirs(files: Array<{ path: string; status: string }>): string[] {
+  const roots: string[] = [];
+  for (const f of files) {
+    const parts = f.path.split("/");
+    const name = parts[parts.length - 1] ?? "";
+    if (parts.length < 2 || !PROJECT_MANIFESTS.has(name)) continue;
+    const dir = parts.slice(0, -1).join("/");
+    if (/(^|\/)(packages|node_modules|\.github)(\/|$)/.test(dir)) continue;
+    if (!roots.includes(dir)) roots.push(dir);
+  }
+  const count = (dir: string) => files.filter((f) => f.path.startsWith(`${dir}/`)).length;
+  // if fleet/ and fleet/apps/web both have manifests keep the shallower one; it owns the other
+  const shallow = roots.filter((dir) => !roots.some((other) => other !== dir && dir.startsWith(`${other}/`)));
+  return shallow.sort((a, b) => count(b) - count(a) || a.localeCompare(b));
 }
 
 function jsonParse(text: string): unknown {

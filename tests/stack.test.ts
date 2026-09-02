@@ -124,4 +124,18 @@ describe("changedExampleDirs", () => {
     ]);
     expect(dirs).toEqual(["examples/my-agent", "examples/browser-quickstart-ts"]);
   });
+
+  it("finds a project that lives outside examples/ by its manifest", () => {
+    const dirs = changedExampleDirs([
+      { status: "A", path: "fleet/package.json" },
+      { status: "A", path: "fleet/apps/web/package.json" },
+      { status: "A", path: "fleet/apps/web/src/index.ts" },
+      { status: "A", path: "fleet/packages/core/package.json" },
+      { status: "A", path: "fleet/docs/README.md" },
+      { status: "A", path: "tools/forklift.yaml" },
+      { status: "M", path: "README.md" },
+      { status: "M", path: "package.json" },
+    ]);
+    expect(dirs).toEqual(["fleet", "tools"]);
+  });
 });

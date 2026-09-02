@@ -29,7 +29,7 @@ flowchart LR
   Pool --> Sbx["Solari sandbox per bay"]
   Sbx --> Clone["git clone fork + fetch upstream"]
   Clone --> Scan["secret scan (fails closed)"]
-  Scan --> Detect["detect stack: root, or the examples/ dir the fork changed"]
+  Scan --> Detect["detect stack: root, or the directory the fork's diff added a manifest to"]
   Detect --> Install["install / build / test"]
   Install -->|server| Serve["start + previewUrl(port)"]
   Serve --> Browser["Solari browser, recording: true"]
@@ -56,7 +56,8 @@ Two SDKs, used the way they are sold: sandboxes as disposable CI workers, browse
 
 - `new Solari({ apiKey }).launch({ recording: true })`, `newPage()`, `page.goto(previewUrl, { waitUntil: "domcontentloaded" })`, then the `demo` steps from the guest's `forklift.yaml` (goto / click / wait / screenshot).
 - Console errors, page errors, and failed requests are collected off the page and land on the card.
-- `browser.close()`, then poll `client.sessions.getReplayUrl(sessionId)` for the replay. `client.close()` so the process can exit.
+- The pass scrolls the page over ~3s before `close()`, so the recorder has motion and time to flush.
+- `browser.close()`, then `client.sessions.getReplayUrl(sessionId)` for the replay, retried for 45s and again on demand from the card. `client.close()` so the process can exit.
 
 **Desktops** are detected in submissions (`@solarisdk/desktop`) but Forklift does not use them itself. Depth on two surfaces beat a gimmick on three.
 
@@ -136,11 +137,15 @@ Each of these is a comment next to the code that handles it.
 - **`kill()`, not `close()` or `pause()`, when you are done.** A paused sandbox still counts against concurrency. Bays kill on every exit path ([`pipeline.ts`](lib/engine/pipeline.ts)).
 - **Concurrency caps are usually below five, and the 429 is deterministic.** Two floors started a minute apart failed with `Too many concurrent sessions` in production. Every sandbox now goes through one process-wide gate ([`slots.ts`](lib/engine/slots.ts)), `createReviewSandbox` waits up to `FORKLIFT_SLOT_WAIT_MS` polling every 10s (reclaiming our own orphans first), and the bay log names the org cap the gateway reports. `FORKLIFT_BAY_CONCURRENCY` (default 1) is how many bays hold a slot at once.
 - **The `base` template ships Node 18.** Playwright, and so `@solarisdk/browser`, refuses to start on it, and Vite 7 wants `util.styleText`; two of the first three live forks died on boot for this reason. Forklift unpacks the Node major the guest asks for (`.nvmrc` / `engines.node`, default 22) into `/opt/node` and puts it first on `PATH` ([`pipeline.ts`](lib/engine/pipeline.ts) `ensureNode`). The log records `node v18.20.4 → v22.x`.
-- **Dev servers bind loopback and ignore `HOST`.** Vite prints `Network: use --host to expose`, and the preview proxy 502s forever. After 20s with no answer Forklift probes `127.0.0.1:<port>` from inside the guest and, if something is there, starts a TCP forwarder on `0.0.0.0` and takes a new `previewUrl`.
+- **Dev servers bind loopback and ignore `HOST`.** Vite prints `Network: use --host to expose`, and the preview proxy 502s forever. After 20s with no answer Forklift probes `127.0.0.1:<port>` *and* `[::1]:<port>` from inside the guest (Vite's `localhost` is `::1` on Node 17+; a v4-only probe missed it) and, if something is there, starts a TCP forwarder on `0.0.0.0` and takes a new `previewUrl`. The forwarder also rewrites `Host` to `localhost:<port>` per request, because Vite's `server.allowedHosts` 403s the preview hostname and the first "working" screenshot was that block page.
+- **`previewUrl()` returns `https://<host>?pt_token=…` and the token has to survive your URL math.** `new URL("/health", previewUrl)` silently drops the query, the gateway answers `401 invalid preview token`, and the recorded browser dutifully screenshots the 401 page. Every path join goes through `previewPath()` ([`preview.ts`](lib/engine/preview.ts)), which keeps the token.
+- **The gateway speaks 5xx for "nothing bound yet"; anything else is the app.** An API-only server answering 404 on `/` is up. The health poll treats `< 500` as alive and notes the status.
+- **`commands.start()` hands back an exit promise that rejects when the sandbox dies, and nobody awaits a dev server's exit.** Node's default for an unobserved rejection is to exit the process: the site went down mid-review. Every `start()` handle is observed (`observe()` in [`pipeline.ts`](lib/engine/pipeline.ts)) and [`instrumentation.ts`](instrumentation.ts) logs unhandled rejections instead of dying.
+- **A pool host can drop every sandbox's control channel (`Control channel closed (1005)`) 5–10s after boot, for minutes at a time.** Three floors in a row failed this way on one host while a fresh `create()` on another host ran for minutes. A bay retries once with a new sandbox before it reports the drop.
 - **Do not force `PORT` on a framework that has its own default.** Handing `PORT=5173` to a Vite app made its sibling API server (`concurrently` server+web) grab 5173 first and Vite died with `EADDRINUSE`. `PORT` is only set when the port came from `forklift.yaml` or the generic 3000 default.
 - **Warm snapshots 409 "Not snapshottable" on the base template often enough that it is opt-in**, and the warm-up box itself eats a slot ([`clients.ts`](lib/solari/clients.ts)).
 - **`networkidle` never settles on dev servers with HMR/websockets.** The browser pass waits for `domcontentloaded` plus a short beat ([`browser.ts`](lib/engine/browser.ts)).
-- **Recording is per session and the replay upload is async.** `recording: true` at launch, then poll `getReplayUrl` for ~18s after `close()`.
+- **Replays publish late, or not at all.** The docs say ~1–3s after `close()`; in production `getReplayUrl` 404'd `No replay available` for 45s on every real session, and the docs' own six-line snippet went from "replay in 6s" to "nothing after 120s" on the same key twenty minutes later. Forklift stores the browser **session id** and the card links `/api/bays/:id/replay`, which mints a fresh presigned URL on click (they expire in 15 minutes anyway) and says plainly when Solari has not published one.
 - **Do not release a browser session twice.** `browser.close()` already releases; a second DELETE 404s and can wipe the screenshot.
 - **Commands are not shell-interpreted.** Everything user-shaped goes through `sh -c` with the command in `args`.
 - **`timeoutMs` is a rolling idle window**, so the pipeline keeps its own wall-clock budget (5 min default, `timeoutMinutes` in `forklift.yaml` up to 8).
