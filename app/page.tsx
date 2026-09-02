@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { RecentFloors } from "./recent-floors";
 
+const DEFAULT_UPSTREAM = "https://github.com/solari-sdk/solari-cookbook";
 const DEFAULT_CRITERIA = `Uses Solari sandboxes as infrastructure
 Uses Solari browser recording
 Ships a real product, not a tutorial clone
@@ -40,9 +41,13 @@ async function readError(res: Response): Promise<string> {
   return res.statusText ? `${res.status} ${res.statusText}` : `HTTP ${res.status}`;
 }
 
+function cookbookLabel(url: string): string {
+  return url.replace(/^https?:\/\/github\.com\//, "") || "solari-sdk/solari-cookbook";
+}
+
 function Requisition() {
   const router = useRouter();
-  const [upstream, setUpstream] = useState("https://github.com/solari-sdk/solari-cookbook");
+  const [upstream, setUpstream] = useState(DEFAULT_UPSTREAM);
   const [criteria, setCriteria] = useState(DEFAULT_CRITERIA);
   const [selfRepo, setSelfRepo] = useState("");
   const [verifyUrl, setVerifyUrl] = useState("");
@@ -93,7 +98,7 @@ function Requisition() {
           <h2 className="stencil mt-1 text-3xl">New review</h2>
         </div>
         <span className="stamp text-[11px]" style={{ color: "var(--stamp)" }}>
-          Contest
+          Solari challenge
         </span>
       </div>
 
@@ -104,31 +109,24 @@ function Requisition() {
           void submit(verifyUrl.trim() ? "verify" : "contest");
         }}
       >
-        <label className="block text-[10px] tracking-[0.22em] opacity-70">
-          UPSTREAM REPO
-        </label>
-        <input className="paper-field mt-1" value={upstream} onChange={(e) => setUpstream(e.target.value)} />
+        <p className="text-[10px] tracking-[0.22em] opacity-70">JUDGING FORKS OF</p>
+        <p className="mt-1 text-sm leading-6" title={upstream}>
+          <span className="font-semibold">{cookbookLabel(upstream)}</span>
+        </p>
+        <p className="mt-2 text-[11px] leading-5 opacity-60">
+          Not the cookbook itself — other applicants’ forks of this challenge.
+        </p>
 
-        <label className="mt-5 block text-[10px] tracking-[0.22em] opacity-70">
-          CRITERIA · ONE PER LINE
-        </label>
-        <textarea
-          className="paper-field mt-1 min-h-28 resize-y leading-[28px]"
-          value={criteria}
-          onChange={(e) => setCriteria(e.target.value)}
-        />
-
-        <label className="mt-5 block text-[10px] tracking-[0.22em] opacity-70">
-          YOUR REPO · OPTIONAL
-        </label>
+        <label className="mt-5 block text-[10px] tracking-[0.22em] opacity-70">ACCESS KEY</label>
         <input
           className="paper-field mt-1"
-          placeholder="https://github.com/you/forklift"
-          value={selfRepo}
-          onChange={(e) => setSelfRepo(e.target.value)}
+          type="password"
+          autoComplete="off"
+          value={accessKey}
+          onChange={(e) => setAccessKey(e.target.value)}
         />
         <p className="mt-2 text-[11px] leading-5 opacity-60">
-          Blank puts this Forklift app in bay 05.
+          This site’s password, not a Solari key. Needed to start a live run.
         </p>
 
         <label className="mt-5 block text-[10px] tracking-[0.22em] opacity-70">
@@ -141,20 +139,46 @@ function Requisition() {
           onChange={(e) => setVerifyUrl(e.target.value)}
         />
         <p className="mt-2 text-[11px] leading-5 opacity-60">
-          Fill this to inspect one submission instead of the whole network.
+          Fill to inspect one submission instead of the whole network.
         </p>
 
-        <label className="mt-5 block text-[10px] tracking-[0.22em] opacity-70">ACCESS KEY</label>
-        <input
-          className="paper-field mt-1"
-          type="password"
-          autoComplete="off"
-          value={accessKey}
-          onChange={(e) => setAccessKey(e.target.value)}
-        />
-        <p className="mt-2 text-[11px] leading-5 opacity-60">
-          This site’s password, not a Solari key.
-        </p>
+        <details className="mt-5 border-t border-[rgba(38,35,28,0.15)] pt-4">
+          <summary className="cursor-pointer text-[10px] tracking-[0.22em] opacity-70 hover:opacity-100">
+            ADVANCED · UPSTREAM, CRITERIA, YOUR REPO
+          </summary>
+          <div className="mt-4">
+            <label className="block text-[10px] tracking-[0.22em] opacity-70">
+              UPSTREAM REPO
+            </label>
+            <input
+              className="paper-field mt-1"
+              value={upstream}
+              onChange={(e) => setUpstream(e.target.value)}
+            />
+
+            <label className="mt-5 block text-[10px] tracking-[0.22em] opacity-70">
+              CRITERIA · ONE PER LINE
+            </label>
+            <textarea
+              className="paper-field mt-1 min-h-28 resize-y leading-[28px]"
+              value={criteria}
+              onChange={(e) => setCriteria(e.target.value)}
+            />
+
+            <label className="mt-5 block text-[10px] tracking-[0.22em] opacity-70">
+              YOUR REPO · OPTIONAL
+            </label>
+            <input
+              className="paper-field mt-1"
+              placeholder="https://github.com/you/forklift"
+              value={selfRepo}
+              onChange={(e) => setSelfRepo(e.target.value)}
+            />
+            <p className="mt-2 text-[11px] leading-5 opacity-60">
+              Blank puts this Forklift app in bay 05.
+            </p>
+          </div>
+        </details>
 
         {error ? (
           <div className="relative mt-6">
@@ -171,7 +195,7 @@ function Requisition() {
             onClick={() => void submit("contest")}
             className="press stencil flex-1 bg-[#26231c] px-4 py-3 text-lg tracking-wide text-[#ece3cd] hover:bg-[#3a362b] disabled:opacity-50"
           >
-            {busy === "contest" ? "Starting…" : "Review all forks"}
+            {busy === "contest" ? "Starting…" : "Review this challenge"}
           </button>
           <button
             type="button"
@@ -216,20 +240,33 @@ export default function Home() {
                 </div>
               ))}
             </dl>
-            <p className="mt-8 text-[11px] tracking-[0.2em] text-[var(--mute)]">
-              SUBMITTED A FORK? <Link href="/verify" className="text-[var(--amber)]">CHECK IT →</Link>
-            </p>
+
             {SHOWROOM ? (
-              <p className="mt-3 text-[11px] tracking-[0.2em] text-[var(--mute)]">
-                JUST LOOKING? <Link href={`/floor/${SHOWROOM}`} className="text-[var(--amber)]">SEE A FINISHED FLOOR →</Link>
-              </p>
+              <div className="mt-10 max-w-md">
+                <Link
+                  href={`/floor/${SHOWROOM}`}
+                  className="press stencil inline-flex w-full items-center justify-center bg-[var(--amber)] px-5 py-3.5 text-lg tracking-wide text-[#121416] hover:bg-[var(--amber-deep)] hover:text-[#f3ead8]"
+                >
+                  See a finished floor
+                </Link>
+                <p className="mt-3 text-[11px] leading-5 text-[var(--mute)]">
+                  No key. Open a bay when the lamp is green — screenshot, replay, evidence.
+                </p>
+              </div>
             ) : null}
-            <RecentFloors />
+
+            <p className="mt-6 text-[11px] tracking-[0.2em] text-[var(--mute)]">
+              SUBMITTED A FORK?{" "}
+              <Link href="/verify" className="text-[var(--amber)]">
+                CHECK IT →
+              </Link>
+            </p>
           </div>
         </header>
 
         <Requisition />
       </div>
+      <RecentFloors />
       <div className="hazard" />
     </main>
   );

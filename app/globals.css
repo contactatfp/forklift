@@ -161,6 +161,28 @@ body::after {
   );
 }
 
+/* history drawer slides in from the right — keep it out of the homepage grid */
+.history-drawer {
+  animation: history-in 220ms var(--ease-out) both;
+}
+
+@keyframes history-in {
+  from {
+    transform: translateX(12px);
+    opacity: 0.85;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .history-drawer {
+    animation: none;
+  }
+}
+
 /* ---------- landing: the requisition slip ---------- */
 
 .paper {
