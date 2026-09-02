@@ -605,6 +605,204 @@ body::after {
   color: var(--mute);
 }
 
+#artifact {
+  scroll-margin-top: 1.5rem;
+}
+
+/* LOOK that actually does something — a pull-tab, not a caption */
+button.stamp-look,
+a.stamp-look {
+  cursor: pointer;
+  background: transparent;
+  color: var(--amber);
+  opacity: 0.95;
+  text-decoration: none;
+  font-size: 10px;
+}
+
+button.stamp-look:hover,
+a.stamp-look:hover {
+  color: var(--paper);
+  background: rgba(240, 167, 10, 0.12);
+  opacity: 1;
+}
+
+.shot-note {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  color: var(--amber);
+  cursor: pointer;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+a.shot-note {
+  display: inline;
+}
+
+.shot-note:hover {
+  color: var(--fog);
+}
+
+.shot-note.dead {
+  color: var(--mute);
+}
+
+.shot-expand {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--amber);
+  cursor: pointer;
+}
+
+.shot-expand:hover {
+  color: var(--fog);
+}
+
+button.shot-hit {
+  display: block;
+  width: 100%;
+  max-height: 26rem;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  border: none;
+  background: #0b0d0f;
+  cursor: zoom-in;
+  text-align: left;
+  scrollbar-width: thin;
+  scrollbar-color: #2a3036 transparent;
+}
+
+button.shot-hit img {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+}
+
+button.shot-hit:hover img {
+  filter: brightness(1.05);
+}
+
+button.stamp-look:focus-visible,
+.shot-note:focus-visible,
+.shot-expand:focus-visible,
+button.shot-hit:focus-visible {
+  outline: 1px solid var(--amber);
+  outline-offset: 3px;
+}
+
+/* warehouse inspection table — native dialog, not a saas overlay */
+.shot-lightbox {
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: clamp(10px, 2.4vw, 28px);
+  overflow: hidden;
+  border: none;
+  background: transparent;
+  color: var(--fog);
+}
+
+.shot-lightbox::backdrop {
+  background:
+    radial-gradient(ellipse at 50% 42%, rgba(28, 24, 16, 0.35) 0%, rgba(6, 7, 8, 0.94) 62%);
+}
+
+.shot-lightbox[open] {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  animation: shot-in 220ms var(--ease-out) both;
+}
+
+@keyframes shot-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.shot-lightbox-bay {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  align-self: stretch;
+  width: min(1120px, 100%);
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+  background-color: #0b0d0f;
+  border: 1px solid var(--line);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 28px 80px rgba(0, 0, 0, 0.72);
+}
+
+.shot-lightbox-bay .hazard {
+  height: 8px;
+}
+
+.shot-lightbox-bay::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.04;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.shot-lightbox-bay > * {
+  position: relative;
+  z-index: 1;
+}
+
+.shot-lightbox-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 12rem;
+  background-color: #0b0d0f;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #2a3036 transparent;
+}
+
+.shot-lightbox-body img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.shot-nosignal {
+  margin: 0;
+  padding: 4.5rem 1.5rem;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--phosphor);
+  letter-spacing: 0.04em;
+}
+
 /* ---------- verify: hand-sketched fork graph ---------- */
 
 .fork-sketch {
@@ -899,5 +1097,9 @@ button {
   .sketch-node-fork,
   .sketch-node-fork .sketch-dot {
     transition-duration: 0ms;
+  }
+
+  .shot-lightbox[open] {
+    animation: none;
   }
 }

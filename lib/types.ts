@@ -96,7 +96,13 @@ export type ReadmeCheck = {
 
 export type CriterionResult =
   | { label: string; kind: "auto"; met: boolean; note: string }
-  | { label: string; kind: "manual"; note: string };
+  | {
+      label: string;
+      kind: "manual";
+      note: string;
+      /** Where LOOK should take you. Older stored cards omit this; the card infers from `note`. */
+      inspect?: "screenshot" | "transcript";
+    };
 
 export type ScriptRun = {
   command: string;

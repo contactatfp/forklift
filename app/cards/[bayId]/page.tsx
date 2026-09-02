@@ -1,8 +1,18 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getStore } from "@/lib/store";
-import type { CriterionResult, Evidence } from "@/lib/types";
+import { CriterionRow, InspectShot, ShotBezel } from "@/app/cards/[bayId]/inspect-shot";
 import { DryRunNotice } from "@/app/dry-run-notice";
+import { getStore } from "@/lib/store";
+import type { Evidence } from "@/lib/types";
+
+function shotEmptyReason(ev: Evidence): string {
+  if (ev.kind === "script") return "This bay ran a script. There is no page screenshot — read the transcript.";
+  if (!ev.previewUrl) return "No start command, so no preview and no screenshot.";
+  if (ev.previewUp === false) {
+    return "The app started but never answered 200 on its health path. No browser pass. Check the log.";
+  }
+  return "Preview came up but the browser pass left no screenshot.";
+}
 
 function facts(ev: Evidence): string {
   if (ev.measured === false) {
@@ -61,7 +71,7 @@ function Artifact({
         : `EXIT ${s.exitCode ?? "?"}`;
     const tone = s.timedOut || (s.exitCode !== 0 && !s.needsKey) ? "bad" : s.needsKey ? "amber" : "ok";
     return (
-      <section className="bezel crt">
+      <section id="artifact" className="bezel crt">
         <div className="crt-bar">
           <span className="min-w-0 truncate">
             $ <span className="text-[var(--fog)]">{s.command}</span>
@@ -83,40 +93,12 @@ function Artifact({
   }
 
   return (
-    <section className="bezel crt">
-      <div className="crt-bar">
-        <span>PREVIEW</span>
-        <span>{hasScreenshot ? "FULL PAGE · SCROLL" : "NO SIGNAL"}</span>
-      </div>
-      {hasScreenshot ? (
-        <div className="shot-frame">
-          {/* eslint-disable-next-line @next/next/no-img-element -- PNG straight out of our own DB, no loader wanted */}
-          <img src={`/api/bays/${bayId}/screenshot`} alt={`${repoName} preview screenshot`} />
-        </div>
-      ) : (
-        <p className="p-10 text-center text-sm text-[var(--mute)]">
-          {!ev.previewUrl
-            ? "No start command, so no preview and no screenshot."
-            : ev.previewUp === false
-              ? "The app started but never answered 200 on its health path. No browser pass. Check the log."
-              : "Preview came up but the browser pass left no screenshot."}
-        </p>
-      )}
-    </section>
-  );
-}
-
-function Criterion({ c }: { c: CriterionResult }) {
-  const state = c.kind === "manual" ? "man" : c.met ? "yes" : "no";
-  const label = c.kind === "manual" ? "LOOK" : c.met ? "YES" : "NO";
-  return (
-    <li className="criterion-row">
-      <div className="min-w-0">
-        <p className="text-sm text-[var(--fog)]">{c.label}</p>
-        <p className="mt-0.5 text-[11px] leading-5 text-[var(--mute)]">{c.note}</p>
-      </div>
-      <span className={`stamp stamp-${state} flex-none text-[10px]`}>{label}</span>
-    </li>
+    <ShotBezel
+      src={`/api/bays/${bayId}/screenshot`}
+      alt={`${repoName} preview screenshot`}
+      hasScreenshot={hasScreenshot}
+      emptyReason={shotEmptyReason(ev)}
+    />
   );
 }
 
@@ -234,6 +216,12 @@ export default async function CardPage({ params }: { params: Promise<{ bayId: st
         {!ev ? (
           <p className="mt-10 text-sm text-[var(--mute)]">Still {bay.status}.</p>
         ) : (
+          <InspectShot
+            bayId={bay.id}
+            repoName={bay.repo.name}
+            hasScreenshot={bay.hasScreenshot}
+            emptyReason={shotEmptyReason(ev)}
+          >
           <div className="card-stack mt-6">
             <Artifact ev={ev} bayId={bay.id} hasScreenshot={bay.hasScreenshot} repoName={bay.repo.name} />
 
@@ -241,7 +229,7 @@ export default async function CardPage({ params }: { params: Promise<{ bayId: st
               <Section title="Criteria">
                 <ul>
                   {ev.criteria.map((c) => (
-                    <Criterion key={c.label} c={c} />
+                    <CriterionRow key={c.label} c={c} />
                   ))}
                 </ul>
               </Section>
@@ -413,6 +401,7 @@ export default async function CardPage({ params }: { params: Promise<{ bayId: st
               <pre className="term max-h-64 p-3">{bay.logs.join("\n") || "quiet"}</pre>
             </Section>
           </div>
+          </InspectShot>
         )}
       </div>
       <div className="hazard" />

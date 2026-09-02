@@ -116,6 +116,11 @@ export function evaluateCriteria(lines: string[], input: CriteriaInput) {
         note: s.timedOut ? "Timed out." : s.exitCode === 0 ? "Ran to completion, exit 0." : `Exit ${s.exitCode ?? "?"}.`,
       };
     }
-    return { label, kind: "manual" as const, note: input.script ? "Read the transcript." : "Open the screenshot." };
+    return {
+      label,
+      kind: "manual" as const,
+      note: input.script ? "Read the transcript." : "Open the screenshot.",
+      inspect: input.script ? ("transcript" as const) : ("screenshot" as const),
+    };
   });
 }

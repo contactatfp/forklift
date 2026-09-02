@@ -33,7 +33,7 @@ describe("evaluateCriteria", () => {
     });
     expect(out[0]).toMatchObject({ kind: "auto", met: true });
     expect(out[1]).toMatchObject({ kind: "auto", met: true });
-    expect(out[2]?.kind).toBe("manual");
+    expect(out[2]).toMatchObject({ kind: "manual", inspect: "screenshot", note: "Open the screenshot." });
     expect(out[3]).toMatchObject({ kind: "auto", met: true });
   });
 
