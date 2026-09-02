@@ -532,7 +532,7 @@ async function runBay(input: BayInput): Promise<void> {
         `diff -rq /work/upstream ${WORK} | grep -v node_modules | grep -v '.git' | head -80`,
         { timeoutMs: budget.cap(20_000) },
       );
-      diff = parseDirDiff(listed.stdout);
+      diff = parseDirDiff(listed.stdout, { upstream: "/work/upstream", submission: WORK });
       await logBay(input.bay, `diff ${diff.filesChanged} paths vs upstream`);
     } else {
       const env = gitEnv();

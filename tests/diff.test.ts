@@ -28,14 +28,22 @@ describe("parseDiff", () => {
 
 describe("parseDirDiff", () => {
   it("turns diff -rq output into added/modified rows", () => {
-    const d = parseDirDiff([
-      "Only in /work/submission: forklift.yaml",
-      "Files /work/upstream/README.md and /work/submission/README.md differ",
-    ].join("\n"));
-    expect(d.filesChanged).toBe(2);
+    const d = parseDirDiff(
+      [
+        "Only in /work/submission: forklift.yaml",
+        "Only in /work/submission/lib/engine: slots.ts",
+        "Only in /work/upstream/examples: old-demo",
+        "Files /work/upstream/README.md and /work/submission/README.md differ",
+      ].join("\n"),
+      { upstream: "/work/upstream", submission: "/work/submission" },
+    );
+    expect(d.filesChanged).toBe(4);
     expect(d.files).toEqual([
       { status: "A", path: "forklift.yaml" },
-      { status: "M", path: "/work/submission/README.md" },
+      { status: "A", path: "lib/engine/slots.ts" },
+      { status: "D", path: "examples/old-demo" },
+      { status: "M", path: "README.md" },
     ]);
+    expect(d.newTopLevel).toEqual(["forklift.yaml", "lib"]);
   });
 });
