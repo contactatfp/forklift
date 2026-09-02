@@ -3,7 +3,13 @@ import { parseDiff, parseDirDiff } from "@/lib/detect/diff";
 import { EMPTY_SOLARI, detectSolari, mergeSolari } from "@/lib/detect/solari";
 import { checkReadme, evaluateCriteria } from "@/lib/detect/readme";
 import { SECRET_SCAN_SCRIPT } from "@/lib/detect/secrets";
-import { changedExampleDirs, detectStack, type DetectedStack } from "@/lib/detect/stack";
+import {
+  ENTRY_FILES,
+  changedExampleDirs,
+  desiredNodeMajor,
+  detectStack,
+  type DetectedStack,
+} from "@/lib/detect/stack";
 import { recordPreview } from "@/lib/engine/browser";
 import { getHub } from "@/lib/engine/events";
 import { isLocalRepo, packLocalTree } from "@/lib/engine/pack";
@@ -128,6 +134,7 @@ const MANIFEST_NAMES = [
   "Pipfile",
   "forklift.yaml",
   "forklift.yml",
+  ".nvmrc",
   "README.md",
   "readme.md",
   "next.config.ts",
@@ -136,12 +143,7 @@ const MANIFEST_NAMES = [
   "main.py",
   "app.py",
   "manage.py",
-  "index.ts",
-  "index.js",
-  "main.ts",
-  "main.js",
-  "server.ts",
-  "server.js",
+  ...ENTRY_FILES,
 ];
 
 /** Read the files detection cares about from `dir`. Keys are relative to `dir`. */
@@ -271,6 +273,64 @@ async function readsSolariKey(sbx: Sandbox, dir: string): Promise<boolean> {
 
 function tail(text: string, chars: number): string {
   return text.length > chars ? `…${text.slice(-chars)}` : text;
+}
+
+const nodeVersionCache = new Map<number, Promise<string | null>>();
+
+/** Latest release of a Node major, from nodejs.org's index. Cached per process. */
+function latestNodeFor(major: number): Promise<string | null> {
+  const cached = nodeVersionCache.get(major);
+  if (cached) return cached;
+  const p = (async () => {
+    try {
+      const res = await fetch("https://nodejs.org/dist/index.json");
+      if (!res.ok) return null;
+      const list = (await res.json()) as Array<{ version: string; files: string[] }>;
+      const hit = list.find((r) => r.version.startsWith(`v${major}.`) && r.files.includes("linux-x64"));
+      return hit?.version ?? null;
+    } catch {
+      return null;
+    }
+  })();
+  nodeVersionCache.set(major, p);
+  return p;
+}
+
+/**
+ * The base image ships Node 18. Playwright — and so @solarisdk/browser — needs
+ * 20+, which knocks out most Node forks before they start. Drop the wanted
+ * major into /opt/node and put it first on PATH for the rest of the review.
+ */
+async function ensureNode(
+  sbx: Sandbox,
+  wantMajor: number,
+  budget: Budget,
+  note: (line: string) => Promise<void>,
+): Promise<Record<string, string>> {
+  const have = await sh(sbx, "node -v 2>/dev/null || echo none", { timeoutMs: budget.cap(10_000) });
+  const haveMajor = Number(/v(\d+)/.exec(have.stdout)?.[1] ?? 0);
+  if (haveMajor >= wantMajor) return {};
+
+  const version = await latestNodeFor(wantMajor);
+  if (!version) {
+    await note(`node ${wantMajor} wanted but nodejs.org index unavailable; staying on ${have.stdout.trim()}`);
+    return {};
+  }
+  const script = [
+    "set -e",
+    'a=$(uname -m); case "$a" in x86_64) a=x64;; aarch64|arm64) a=arm64;; esac',
+    `curl -fsSL "https://nodejs.org/dist/${version}/node-${version}-linux-$a.tar.xz" -o /tmp/node.tar.xz`,
+    "mkdir -p /opt/node && tar -xJf /tmp/node.tar.xz -C /opt/node --strip-components=1",
+    "/opt/node/bin/node -v",
+  ].join("\n");
+  const got = await sh(sbx, script, { timeoutMs: budget.cap(90_000) });
+  if (got.exitCode !== 0) {
+    await note(`node ${version} install failed (${got.exitCode}); staying on ${have.stdout.trim()}`);
+    return {};
+  }
+  await note(`node ${have.stdout.trim()} → ${got.stdout.trim()} (guest wants ${wantMajor}.x)`);
+  const pathRes = await sh(sbx, "echo $PATH", { timeoutMs: budget.cap(5_000) });
+  return { PATH: `/opt/node/bin:${pathRes.stdout.trim() || "/usr/local/bin:/usr/bin:/bin"}` };
 }
 
 export async function reviewBay(input: {
@@ -424,10 +484,19 @@ export async function reviewBay(input: {
     await store.upsertBay(input.bay);
     getHub().publish(input.bay.jobId, { type: "bay", bay: { ...input.bay } });
 
+    // env every guest command runs with: PATH override once node is swapped, CI so nothing watches
+    const guestEnv: Record<string, string> = { CI: "1", NO_COLOR: "1" };
+    if (input.bay.isSelf) guestEnv.FORKLIFT_FIXTURE = "1";
+    if (stack.stack === "node") {
+      await setStatus(input.bay, "installing");
+      Object.assign(guestEnv, await ensureNode(sbx, desiredNodeMajor(files), budget, (line) => logBay(input.bay, line)));
+    }
+
     // what the guest actually ran on — half of "works on my machine" is right here
     try {
       const tool = await sh(sbx, "echo node $(node -v 2>/dev/null || echo none) · npm $(npm -v 2>/dev/null || echo none) · $(python3 --version 2>/dev/null || echo 'python none')", {
         timeoutMs: budget.cap(10_000),
+        env: guestEnv,
       });
       const line = tool.stdout.trim();
       if (line) await logBay(input.bay, `toolchain ${line}`);
@@ -444,7 +513,7 @@ export async function reviewBay(input: {
       const install = await sh(sbx, stack.install, {
         cwd,
         timeoutMs: budget.cap(180_000),
-        env: input.bay.isSelf ? { FORKLIFT_FIXTURE: "1" } : undefined,
+        env: guestEnv,
         onLog,
       });
       buildOk = install.exitCode === 0;
@@ -461,7 +530,7 @@ export async function reviewBay(input: {
       const built = await sh(sbx, "npm run build", {
         cwd,
         timeoutMs: budget.cap(180_000),
-        env: input.bay.isSelf ? { FORKLIFT_FIXTURE: "1" } : undefined,
+        env: guestEnv,
         onLog,
       });
       buildOk = built.exitCode === 0;
@@ -479,6 +548,7 @@ export async function reviewBay(input: {
       const test = await sh(sbx, stack.test, {
         cwd,
         timeoutMs: budget.cap(90_000),
+        env: guestEnv,
         onLog,
       });
       testsRan = true;
@@ -508,7 +578,7 @@ export async function reviewBay(input: {
         const run = await sh(sbx, stack.start, {
           cwd,
           timeoutMs: budget.cap(SCRIPT_TIMEOUT_MS),
-          env: { CI: "1", NO_COLOR: "1" },
+          env: guestEnv,
           onLog,
         });
         exitCode = run.exitCode;
@@ -533,10 +603,10 @@ export async function reviewBay(input: {
       await setStatus(input.bay, "preview");
       await logBay(input.bay, stack.start);
       const env: Record<string, string> = {
+        ...guestEnv,
         PORT: String(stack.port),
         HOST: "0.0.0.0",
       };
-      if (input.bay.isSelf) env.FORKLIFT_FIXTURE = "1";
       // stream the server's own output into the log so a crash on boot is visible on the card
       await sbx.commands.start("sh", {
         args: ["-c", stack.start],

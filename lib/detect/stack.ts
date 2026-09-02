@@ -35,6 +35,24 @@ const NODE_SERVER_DEPS = [
   "serve",
 ];
 
+/** Entry points worth reading for a `.listen(` — also the list the pipeline fetches from the guest. */
+export const ENTRY_FILES = [
+  "index.ts",
+  "index.js",
+  "main.ts",
+  "main.js",
+  "server.ts",
+  "server.js",
+  "app.ts",
+  "app.js",
+  "src/index.ts",
+  "src/index.js",
+  "src/main.ts",
+  "src/server.ts",
+  "src/server.js",
+  "src/app.ts",
+];
+
 function readKind(value: unknown): RunKind | undefined {
   return value === "server" || value === "script" ? value : undefined;
 }
@@ -51,6 +69,7 @@ type PkgJson = {
   scripts?: Record<string, string>;
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
+  engines?: { node?: string };
 };
 
 function asPkg(value: unknown): PkgJson | null {
@@ -151,7 +170,8 @@ export function detectStack(files: Record<string, string>, opts?: { cwd?: string
       else if (files["index.ts"] || files["main.ts"]) start = `npx tsx ${files["index.ts"] ? "index.ts" : "main.ts"}`;
       else if (files["index.js"] || files["main.js"]) start = `node ${files["index.js"] ? "index.js" : "main.js"}`;
     }
-    if (!test && scripts.test) test = "npm test -- --watchAll=false";
+    // CI=1 in the env keeps jest/vitest out of watch mode; extra args would break node --test
+    if (!test && scripts.test) test = "npm test";
     if (!manifest?.port) {
       if (deps?.vite && !deps?.next) port = 5173;
       else port = 3000;
@@ -161,8 +181,11 @@ export function detectStack(files: Record<string, string>, opts?: { cwd?: string
       start = "npm run start";
     }
     serverish ||= isNext || NODE_SERVER_DEPS.some((name) => Boolean(deps?.[name]));
-    // "listen(" in the entry file is the cheapest tell for a bare http/ws server
-    serverish ||= /\.listen\(|createServer\(/.test(`${files["index.ts"] ?? ""}${files["index.js"] ?? ""}${files["server.ts"] ?? ""}${files["server.js"] ?? ""}`);
+    // "listen(" in an entry file is the cheapest tell for a bare http/ws server
+    const entries = ENTRY_FILES.map((name) => files[name] ?? "").join("\n");
+    serverish ||= /\.listen\(|createServer\(|Bun\.serve\(|serve\(\{/.test(entries);
+    // `"start": "tsx src/server.ts"` — the applicant told us in the script name
+    serverish ||= /\bserver\b/i.test(`${scripts.start ?? ""} ${scripts.dev ?? ""}`);
   }
 
   if (stack === "python") {
@@ -215,6 +238,27 @@ export function detectStack(files: Record<string, string>, opts?: { cwd?: string
     health,
     manifest,
   };
+}
+
+export const DEFAULT_NODE_MAJOR = 22;
+
+/**
+ * Which Node major the guest wants. `.nvmrc` or `engines.node` wins when it
+ * names one; otherwise current LTS. The Solari base image ships 18, which
+ * Playwright (and so @solarisdk/browser) refuses to run on.
+ */
+export function desiredNodeMajor(files: Record<string, string>): number {
+  const nvmrc = files[".nvmrc"]?.trim();
+  const fromNvmrc = nvmrc ? /(\d+)/.exec(nvmrc)?.[1] : undefined;
+  if (fromNvmrc) return Math.max(18, Number(fromNvmrc));
+  const pkg = asPkg(files["package.json"] ? jsonParse(files["package.json"]) : null);
+  const engines = pkg?.engines?.node;
+  if (engines) {
+    // ">=20.9", "^22", "20.x", "18 || 20" → first major named
+    const major = /(\d+)/.exec(engines)?.[1];
+    if (major) return Math.max(18, Number(major));
+  }
+  return DEFAULT_NODE_MAJOR;
 }
 
 /**

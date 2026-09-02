@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { changedExampleDirs, detectStack, parseManifest } from "@/lib/detect/stack";
+import { changedExampleDirs, desiredNodeMajor, detectStack, parseManifest } from "@/lib/detect/stack";
 
 describe("detectStack", () => {
   it("treats a cookbook-style tsx script as a script, not a server", () => {
@@ -14,6 +14,26 @@ describe("detectStack", () => {
     expect(stack.kind).toBe("script");
     expect(stack.start).toBe("npm run start");
     expect(stack.install).toBe("npm install");
+  });
+
+  it("picks the Node major the guest asks for, else current LTS", () => {
+    expect(desiredNodeMajor({})).toBe(22);
+    expect(desiredNodeMajor({ ".nvmrc": "20.11.0\n" })).toBe(20);
+    expect(desiredNodeMajor({ "package.json": JSON.stringify({ engines: { node: ">=18" } }) })).toBe(18);
+    expect(desiredNodeMajor({ "package.json": JSON.stringify({ engines: { node: "^24.0.0" } }) })).toBe(24);
+  });
+
+  it("spots a bare http server by its start script name or a listen() call", () => {
+    const byName = detectStack({
+      "package.json": JSON.stringify({ scripts: { start: "tsx src/server.ts" }, dependencies: { openai: "4" } }),
+    });
+    expect(byName.kind).toBe("server");
+    const byListen = detectStack({
+      "package.json": JSON.stringify({ scripts: { start: "node src/index.js" } }),
+      "src/index.js": "require('http').createServer(h).listen(process.env.PORT)",
+    });
+    expect(byListen.kind).toBe("server");
+    expect(byListen.port).toBe(3000);
   });
 
   it("calls a Next app a server on port 3000 with build+start", () => {
