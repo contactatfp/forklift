@@ -167,18 +167,85 @@ async function readGuestFiles(sbx: Sandbox, dir: string, opts?: { search?: boole
   return files;
 }
 
-async function waitForPreview(url: string, health: string, budget: Budget): Promise<boolean> {
-  const target = new URL(health || "/", url).toString();
-  while (budget.remaining() > 15_000) {
+const PREVIEW_WAIT_MS = 150_000;
+const LOOPBACK_CHECK_AFTER_MS = 20_000;
+
+/** Does anything answer HTTP on 127.0.0.1:port inside the guest? Any status counts. */
+async function listeningOnLoopback(sbx: Sandbox, port: number): Promise<boolean> {
+  const probe = await sbx.commands.run("python3", {
+    args: [
+      "-c",
+      `import urllib.request,sys\ntry:\n  urllib.request.urlopen('http://127.0.0.1:${port}/',timeout=3)\n  print('up')\nexcept urllib.error.HTTPError:\n  print('up')\nexcept Exception as e:\n  print('down',e)`,
+    ],
+    timeoutMs: 8_000,
+  });
+  return probe.stdout.trim().startsWith("up");
+}
+
+/**
+ * Vite, CRA and friends bind 127.0.0.1 by default and ignore HOST, so the
+ * preview proxy 502s forever. Put a dumb TCP forwarder on 0.0.0.0 in front.
+ */
+async function forwardLoopback(sbx: Sandbox, port: number, fwd: number): Promise<void> {
+  const script = `import socket,threading
+def pipe(a,b):
+  try:
+    while True:
+      d=a.recv(65536)
+      if not d: break
+      b.sendall(d)
+  except Exception: pass
+  finally:
+    try: b.shutdown(socket.SHUT_WR)
+    except Exception: pass
+def handle(c):
+  try: u=socket.create_connection(('127.0.0.1',${port}),timeout=10)
+  except Exception:
+    c.close(); return
+  threading.Thread(target=pipe,args=(c,u),daemon=True).start()
+  threading.Thread(target=pipe,args=(u,c),daemon=True).start()
+s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+s.bind(('0.0.0.0',${fwd})); s.listen(64)
+while True:
+  c,_=s.accept(); threading.Thread(target=handle,args=(c,),daemon=True).start()`;
+  await sbx.files.write("/tmp/forklift_forward.py", script);
+  await sbx.commands.start("python3", { args: ["/tmp/forklift_forward.py"] });
+}
+
+type PreviewWait = { up: boolean; url: string; forwarded: boolean };
+
+async function waitForPreview(
+  sbx: Sandbox,
+  initial: { url: string; port: number },
+  health: string,
+  budget: Budget,
+  onNote: (line: string) => Promise<void>,
+): Promise<PreviewWait> {
+  const started = Date.now();
+  let url = initial.url;
+  let forwarded = false;
+  const deadline = Math.min(started + PREVIEW_WAIT_MS, started + Math.max(0, budget.remaining() - 60_000));
+  while (Date.now() < deadline) {
     try {
-      const res = await fetch(target, { redirect: "follow" });
-      if (res.ok) return true;
+      const res = await fetch(new URL(health || "/", url).toString(), { redirect: "follow" });
+      if (res.ok) return { up: true, url, forwarded };
     } catch {
       /* not up yet */
     }
+    if (!forwarded && Date.now() - started > LOOPBACK_CHECK_AFTER_MS) {
+      if (await listeningOnLoopback(sbx, initial.port)) {
+        const fwd = initial.port + 1000;
+        await onNote(`app answers on 127.0.0.1:${initial.port} only · forwarding 0.0.0.0:${fwd} → it`);
+        await forwardLoopback(sbx, initial.port, fwd);
+        url = (await sbx.previewUrl(fwd)).url;
+        forwarded = true;
+        await new Promise((r) => setTimeout(r, 1500));
+        continue;
+      }
+    }
     await new Promise((r) => setTimeout(r, 1500));
   }
-  return false;
+  return { up: false, url, forwarded };
 }
 
 async function readsSolariKey(sbx: Sandbox, dir: string): Promise<boolean> {
@@ -454,17 +521,27 @@ export async function reviewBay(input: {
       const preview = await sbx.previewUrl(stack.port);
       previewUrl = preview.url;
       await logBay(input.bay, `preview ${previewUrl}`);
-      const up = await waitForPreview(preview.url, stack.health, budget);
-      if (!up) {
-        await logBay(input.bay, "preview never returned 200 — skipping browser recording");
+      const wait = await waitForPreview(
+        sbx,
+        { url: preview.url, port: stack.port },
+        stack.health,
+        budget,
+        (line) => logBay(input.bay, line),
+      );
+      if (wait.forwarded) {
+        previewUrl = wait.url;
+        await logBay(input.bay, `preview ${previewUrl}`);
+      }
+      if (!wait.up) {
+        await logBay(input.bay, `preview never returned 200 on ${stack.health || "/"} — skipping browser recording`);
       }
 
-      if (up) {
+      if (wait.up) {
         await setStatus(input.bay, "recording");
         await logBay(input.bay, "recording browser session");
         try {
           const pass = await recordPreview({
-            previewUrl: preview.url,
+            previewUrl: wait.url,
             health: stack.health,
             demo: stack.manifest?.demo ?? [],
           });
