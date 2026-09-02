@@ -87,6 +87,23 @@ export async function recordPreview(input: {
       }
     }
 
+    // The recorder flushes in intervals; a goto-shot-close session ended before the
+    // first flush and Solari never published a replay (the same key got one from a
+    // 4s example.com session). Dwell, scroll the page once so the tape has motion.
+    if (pageOpened) {
+      try {
+        await page.mouse.move(200, 200);
+        for (let i = 1; i <= 3; i++) {
+          await page.mouse.wheel(0, 400);
+          await sleep(700);
+        }
+        await page.evaluate(() => window.scrollTo({ top: 0, behavior: "auto" }));
+        await sleep(1500);
+      } catch {
+        /* pages without a scrollable body still record fine */
+      }
+    }
+
     if (!screenshot && pageOpened) {
       const png = await page.screenshot({ fullPage: true, type: "png" });
       screenshot = png;

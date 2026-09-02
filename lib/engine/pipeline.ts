@@ -212,10 +212,14 @@ async function listeningOnLoopback(sbx: Sandbox, port: number): Promise<string |
 
 /**
  * Vite, CRA and friends bind loopback by default and ignore HOST, so the
- * preview proxy 502s forever. Put a dumb TCP forwarder on 0.0.0.0 in front.
+ * preview proxy 502s forever. Put a small TCP forwarder on 0.0.0.0 in front.
+ * It rewrites the Host header on each request to `localhost:<port>`: Vite's
+ * `server.allowedHosts` otherwise 403s the preview hostname ("Blocked request.
+ * This host is not allowed"), which is what the second live screenshot showed.
  */
 async function forwardLoopback(sbx: Sandbox, host: string, port: number, fwd: number): Promise<void> {
-  const script = `import socket,threading
+  const script = `import socket,threading,re
+HOST_RE=re.compile(rb'^Host:[^\\r\\n]*', re.I|re.M)
 def pipe(a,b):
   try:
     while True:
@@ -226,11 +230,39 @@ def pipe(a,b):
   finally:
     try: b.shutdown(socket.SHUT_WR)
     except Exception: pass
+def client_to_upstream(c,u):
+  # rewrite Host in every request header block; after a websocket upgrade or a
+  # body we cannot frame (chunked) just pipe bytes
+  buf=b''; raw=False; body=0
+  try:
+    while True:
+      d=c.recv(65536)
+      if not d: break
+      if raw:
+        u.sendall(d); continue
+      buf+=d
+      while buf:
+        if body>0:
+          n=min(body,len(buf)); u.sendall(buf[:n]); buf=buf[n:]; body-=n; continue
+        i=buf.find(b'\\r\\n\\r\\n')
+        if i<0: break
+        head=buf[:i+4]; buf=buf[i+4:]
+        head=HOST_RE.sub(b'Host: localhost:${port}',head,count=1)
+        u.sendall(head)
+        low=head.lower()
+        if b'upgrade: websocket' in low or b'transfer-encoding: chunked' in low:
+          raw=True; u.sendall(buf); buf=b''; break
+        m=re.search(rb'content-length:\\s*(\\d+)',low)
+        body=int(m.group(1)) if m else 0
+  except Exception: pass
+  finally:
+    try: u.shutdown(socket.SHUT_WR)
+    except Exception: pass
 def handle(c):
   try: u=socket.create_connection((${JSON.stringify(host)},${port}),timeout=10)
   except Exception:
     c.close(); return
-  threading.Thread(target=pipe,args=(c,u),daemon=True).start()
+  threading.Thread(target=client_to_upstream,args=(c,u),daemon=True).start()
   threading.Thread(target=pipe,args=(u,c),daemon=True).start()
 s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
 s.bind(('0.0.0.0',${fwd})); s.listen(64)
